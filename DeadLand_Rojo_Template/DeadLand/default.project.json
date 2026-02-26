@@ -1,0 +1,119 @@
+{
+  "name": "DeadLand",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$path": "src/ReplicatedStorage"
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$path": "src/ServerScriptService"
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$path": "src/StarterPlayerScripts"
+      },
+      "StarterCharacterScripts": {
+        "$className": "StarterCharacterScripts",
+        "$path": "src/StarterCharacterScripts"
+      }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$path": "src/StarterGui"
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "StreamingEnabled": true,
+        "StreamingMinRadius": 64,
+        "StreamingTargetRadius": 256
+      },
+      "World": { "$className": "Folder",
+        "ActiveChunks": { "$className": "Folder" },
+        "StaticGeometry": { "$className": "Folder" },
+        "WaterPlanes": { "$className": "Folder" }
+      },
+      "Entities": { "$className": "Folder",
+        "Zombies": { "$className": "Folder" },
+        "Animals": { "$className": "Folder" },
+        "Bosses": { "$className": "Folder" },
+        "NPCs": { "$className": "Folder" }
+      },
+      "WorldItems": { "$className": "Folder",
+        "ItemDrops": { "$className": "Folder" }
+      },
+      "Vehicles": { "$className": "Folder" },
+      "PlayerBases": { "$className": "Folder" },
+      "POIs": { "$className": "Folder",
+        "Towns": { "$className": "Folder" },
+        "Traders": { "$className": "Folder" },
+        "Bunkers": { "$className": "Folder" }
+      },
+      "VFX": { "$className": "Folder",
+        "ExplosionPool": { "$className": "Folder" },
+        "BloodPool": { "$className": "Folder" },
+        "WeatherEffects": { "$className": "Folder" }
+      },
+      "Zones": { "$className": "Folder",
+        "BiomeZones": { "$className": "Folder" },
+        "TraderZones": { "$className": "Folder" },
+        "DangerZones": { "$className": "Folder" }
+      },
+      "SpawnPoints": { "$className": "Folder" }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Ambient": [0.1, 0.1, 0.15],
+        "Brightness": 2,
+        "ClockTime": 14,
+        "FogEnd": 1000,
+        "GlobalShadows": true,
+        "OutdoorAmbient": [0.2, 0.2, 0.25]
+      },
+      "Atmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Density": 0.3,
+          "Offset": 0.25,
+          "Color": [0.68, 0.73, 0.78],
+          "Decay": [0.36, 0.42, 0.47],
+          "Glare": 0,
+          "Haze": 2.5
+        }
+      },
+      "ColorCorrection": {
+        "$className": "ColorCorrectionEffect",
+        "$properties": { "Saturation": -0.1, "Contrast": 0.05, "Brightness": 0 }
+      },
+      "Bloom": {
+        "$className": "BloomEffect",
+        "$properties": { "Intensity": 0.4, "Size": 24, "Threshold": 0.95 }
+      },
+      "SunRays": {
+        "$className": "SunRaysEffect",
+        "$properties": { "Intensity": 0.25, "Spread": 0.5 }
+      },
+      "DepthOfField": {
+        "$className": "DepthOfFieldEffect",
+        "$properties": { "FarIntensity": 0, "FocusDistance": 50, "InFocusRadius": 20, "NearIntensity": 0 }
+      }
+    },
+
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": { "RespectFilteringEnabled": true },
+      "AmbientLoops": { "$className": "Folder" }
+    }
+  }
+}

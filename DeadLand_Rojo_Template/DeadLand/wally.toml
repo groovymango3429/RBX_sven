@@ -1,0 +1,12 @@
+[package]
+name = "yourname/deadland"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+# Uncomment and add real Wally package names when available
+# ProfileStore = "madstudioroblox/profilestore@^1.0.0"
+# ReplicaService = "madstudioroblox/replicaservice@^1.0.0"
+# Cmdr = "evaera/cmdr@^1.8.0"
+# Promise = "evaera/promise@^4.0.0"

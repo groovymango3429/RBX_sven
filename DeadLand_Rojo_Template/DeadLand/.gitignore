@@ -1,0 +1,16 @@
+# Rojo / Wally
+Packages/
+*.rbxl
+*.rbxlx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
+
+# Build artifacts
+build/
+dist/
