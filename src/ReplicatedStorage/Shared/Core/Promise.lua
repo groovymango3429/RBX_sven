@@ -1,27 +1,14 @@
 --[[
   Promise  [MODULE SCRIPT]
   =======
-  Re-export of Packages/Promise. Lua async/promise pattern.
-See architecture doc §0 for re-export explanation.
+  Re-export wrapper over Packages/Promise (evaera/roblox-lua-promise).
+  Use this module everywhere — never require Packages directly.
+  See architecture doc §0 for re-export explanation.
 ]]
 
-local Promise = {}
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Packages = ReplicatedStorage:WaitForChild("Packages")
 
-
---- new: Create async Promise(resolve, reject)
-function Promise.new()
-  -- TODO: implement
-end
-
---- resolve: Resolve with value
-function Promise.resolve()
-  -- TODO: implement
-end
-
---- reject: Reject with error
-function Promise.reject()
-  -- TODO: implement
-end
-
+local Promise = require(Packages:WaitForChild("Promise"))
 
 return Promise
