@@ -1,11 +1,4 @@
---[[
-  TableUtil  [MODULE SCRIPT]
-  =========
-  Re-export of Packages/TableUtil — deep clone, merge, filter, map, reduce
-]]
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Packages = ReplicatedStorage:WaitForChild("Packages")
 
-local TableUtil = {}
-
-
-
-return TableUtil
+return require(Packages:WaitForChild("TableUtil"))
