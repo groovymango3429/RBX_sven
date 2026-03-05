@@ -36,6 +36,12 @@ local function boot()
   local WeatherRenderer  = load(WorldClient, "WeatherRenderer")
   local DayNightRenderer = load(WorldClient, "DayNightRenderer")
 
+  -- Initialise ChunkRenderer so it begins listening for SendChunk events.
+  -- WHERE: ClientMain.client.lua → ChunkRenderer.init()
+  --   This connects OnClientEvent for the SendChunk remote so terrain
+  --   appears as soon as the server fires chunks at this client.
+  ChunkRenderer.init()
+
   -- Combat
   local CombatClient = script.Parent:WaitForChild("CombatClient")
   local WeaponClient  = load(CombatClient, "WeaponClient")
