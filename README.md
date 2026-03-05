@@ -1,6 +1,6 @@
-# ☣ DeadLand — Roblox Multiplayer Survival
 
-> AAA-scale Roblox survival game inspired by 7 Days to Die.
+
+ game inspired by 7 Days to Die.
 > Full voxel world, zombie AI, crafting, horde nights, vehicles, and electricity.
 
 ## Prerequisites
