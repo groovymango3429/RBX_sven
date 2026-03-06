@@ -24,7 +24,7 @@ local FootstepSys     = require(CharMods:WaitForChild("FootstepSystem"))
 -- Configure humanoid
 humanoid.BreakJointsOnDeath    = false
 humanoid.RequiresNeck           = false
-humanoid.AutoRotate             = false
+humanoid.AutoRotate             = true
 humanoid.WalkSpeed              = 16
 humanoid.JumpPower              = 50
 

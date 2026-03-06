@@ -46,19 +46,19 @@ local ChunkSerializer = {}
 -- ────────────────────────────────────────────────────────────────────────────
 
 local function writeU8(buf, v)
-	buf[#buf + 1] = string.char(v & 0xFF)
+	buf[#buf + 1] = string.char(v % 256)
 end
 
 local function writeI16(buf, v)
 	-- signed 16-bit little-endian
 	if v < 0 then v = v + 0x10000 end
-	buf[#buf + 1] = string.char(v & 0xFF)
-	buf[#buf + 1] = string.char((v >> 8) & 0xFF)
+	buf[#buf + 1] = string.char(v % 256)
+	buf[#buf + 1] = string.char(math.floor(v / 256) % 256)
 end
 
 local function writeU16(buf, v)
-	buf[#buf + 1] = string.char(v & 0xFF)
-	buf[#buf + 1] = string.char((v >> 8) & 0xFF)
+	buf[#buf + 1] = string.char(v % 256)
+	buf[#buf + 1] = string.char(math.floor(v / 256) % 256)
 end
 
 local function readU8(data, pos)
