@@ -1,7 +1,8 @@
 --[[
   ChunkData  [MODULE SCRIPT]
   =========
-  Chunk data structure — 32×128×32 flat array + biome/light metadata.
+  Chunk data structure — flat voxel array + biome/light metadata.
+  Dimensions are driven by ChunkConstants: CHUNK_SIZE × CHUNK_HEIGHT × CHUNK_SIZE.
 
   Coordinate convention
   ---------------------
@@ -16,9 +17,9 @@ local Shared            = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder       = Shared:WaitForChild("World")
 local ChunkConstants    = require(WorldFolder:WaitForChild("ChunkConstants"))
 
-local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 32
+local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 9
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT  -- 128
-local VOLUME       = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE  -- 32*128*32 = 131072
+local VOLUME       = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE  -- 9*128*9 = 10368
 
 local ChunkData = {}
 ChunkData.__index = ChunkData
