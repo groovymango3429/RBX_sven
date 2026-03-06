@@ -6,12 +6,18 @@
 
   Phase 1 rendering strategy
   --------------------------
-  • Only the highest non-air, solid block per XZ column is rendered.
+  • Only blocks on the boundary between solid and air are rendered.
+    A block is a boundary block when it has at least one solid neighbor
+    AND at least one air neighbor (any of the 6 axis-aligned directions).
+    This is equivalent to the visible surface of the solid volume and avoids
+    spawning parts for fully-buried interior blocks.
   • Parts are created in batches across frames to avoid lag spikes.
   • Incoming chunks are queued and processed one at a time so multiple
     arriving chunks don't all hammer the engine simultaneously.
   • The finished folder is parented in one shot at the end of each render
     so the chunk appears atomically rather than part-by-part.
+  • Chunk unloading destroys children in small batches spread across frames
+    to prevent single-frame stalls when many parts are removed at once.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,6 +37,10 @@ local BLOCK_SIZE   = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
 -- How many parts to create per frame during a render pass.
 -- Raise for faster load, lower if you still see frame dips. 128 is a safe start.
 local RENDER_BATCH_SIZE = 128
+
+-- How many parts to destroy per frame during a chunk unload.
+-- Spreading destruction across frames prevents single-frame lag spikes.
+local UNLOAD_BATCH_SIZE = 64
 
 local _activeChunksFolder
 local _renderedChunks = {}  -- chunkKey → Folder
@@ -55,10 +65,37 @@ local function _getMaterial(name)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- Boundary detection
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- The 6 axis-aligned unit-step offsets used for neighbor checks.
+-- Stored as plain {dx,dy,dz} tables to avoid Vector3 allocation overhead.
+local _NEIGHBOR_OFFSETS = {
+  { 1, 0, 0}, {-1, 0, 0},
+  { 0, 1, 0}, { 0,-1, 0},
+  { 0, 0, 1}, { 0, 0,-1},
+}
+
+--- _isOnBoundary: Return true when solid block (x,y,z) touches at least one
+-- air block.  Must only be called on known-solid blocks.
+-- ChunkData:getBlock() already returns 0 for out-of-bounds coordinates, so
+-- chunk edges are treated as air automatically.
+local function _isOnBoundary(chunk, x, y, z)
+  for _, off in ipairs(_NEIGHBOR_OFFSETS) do
+    if chunk:getBlock(x + off[1], y + off[2], z + off[3]) == 0 then
+      return true
+    end
+  end
+  return false
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Batched rendering
 -- ────────────────────────────────────────────────────────────────────────────
 
---- _buildSurfaceList: Walk the chunk once and collect all surface block data.
+--- _buildSurfaceList: Walk the chunk once and collect all boundary block data.
+-- A boundary block is any solid block that has at least one air neighbor,
+-- i.e. the visible surface of the solid volume.
 -- Returns a flat array of {wx, wy, wz, def} so the render loop is just
 -- creating parts — no per-part chunk lookups or branching.
 local function _buildSurfaceList(chunk)
@@ -68,11 +105,11 @@ local function _buildSurfaceList(chunk)
 
   for x = 0, CHUNK_SIZE - 1 do
     for z = 0, CHUNK_SIZE - 1 do
-      for y = CHUNK_HEIGHT - 1, 0, -1 do
+      for y = 0, CHUNK_HEIGHT - 1 do
         local id = chunk:getBlock(x, y, z)
         if id ~= 0 then
           local def = BlockRegistry.getById(id)
-          if def and def.solid then
+          if def and def.solid and _isOnBoundary(chunk, x, y, z) then
             list[#list + 1] = {
               wx  = originX + x * BLOCK_SIZE + BLOCK_SIZE / 2,
               wy  = y * BLOCK_SIZE + BLOCK_SIZE / 2,
@@ -80,7 +117,6 @@ local function _buildSurfaceList(chunk)
               def = def,
             }
           end
-          break  -- only surface block needed per column
         end
       end
     end
@@ -191,14 +227,22 @@ function ChunkRenderer.unloadChunk(cx, cz)
 
   if folder and typeof(folder) == "Instance" then
     -- Unparent instantly — chunk vanishes from view and physics on this frame.
-    -- No per-child loop needed; Destroy() on the folder handles all descendants.
+    -- Destroy children in small batches spread across frames to avoid a lag spike.
     folder.Parent = nil
-    task.defer(function()
+    local logCx, logCz = cx, cz
+    task.spawn(function()
+      local children = folder:GetChildren()
+      for i, child in ipairs(children) do
+        child:Destroy()
+        if i % UNLOAD_BATCH_SIZE == 0 then
+          task.wait()
+        end
+      end
       folder:Destroy()
       if _renderedChunks[key] == false then
         _renderedChunks[key] = nil
       end
-      print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", cx, cz))
+      print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", logCx, logCz))
     end)
   else
     _renderedChunks[key] = nil
