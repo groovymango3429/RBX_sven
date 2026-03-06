@@ -167,16 +167,36 @@ function ChunkRenderer.init()
 	print("[ChunkRenderer] Listening for SendChunk events ✓")
 end
 
+-- Number of parts to destroy per frame during chunk unload.
+-- Spreading destruction across frames prevents single-frame lag spikes.
+local UNLOAD_BATCH_SIZE = 64
+
 --- unloadChunk: Remove a rendered chunk from the workspace.
+-- Parts are destroyed in batches across multiple frames to avoid a lag spike.
 -- @param cx  number
 -- @param cz  number
 function ChunkRenderer.unloadChunk(cx, cz)
 	local key = chunkKey(cx, cz)
 	local folder = _renderedChunks[key]
 	if folder then
-		folder:Destroy()
 		_renderedChunks[key] = nil
-		print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", cx, cz))
+		-- Unparent immediately so the chunk disappears from view right away,
+		-- then destroy its children in small batches to avoid a frame stall.
+		folder.Parent = nil
+		local logCx, logCz = cx, cz
+		task.spawn(function()
+			local children = folder:GetChildren()
+			for i, child in ipairs(children) do
+				if child.Parent then
+					child:Destroy()
+				end
+				if i % UNLOAD_BATCH_SIZE == 0 then
+					task.wait()
+				end
+			end
+			folder:Destroy()
+			print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", logCx, logCz))
+		end)
 	end
 end
 
