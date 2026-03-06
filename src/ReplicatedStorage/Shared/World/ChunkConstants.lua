@@ -7,8 +7,8 @@
 local ChunkConstants = {}
 
 -- Voxel dimensions of a single chunk (width × height × depth)
-ChunkConstants.CHUNK_SIZE   = 32
-ChunkConstants.CHUNK_HEIGHT = 128  -- vertical slices per chunk column
+ChunkConstants.CHUNK_SIZE   = 9
+ChunkConstants.CHUNK_HEIGHT = 400  -- vertical slices per chunk column
 
 -- Studs per voxel block (visual scale, must match ChunkRenderer)
 ChunkConstants.BLOCK_SIZE   = 4

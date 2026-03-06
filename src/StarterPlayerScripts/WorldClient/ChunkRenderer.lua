@@ -7,15 +7,11 @@
   Phase 1 rendering strategy
   --------------------------
   • Only the highest non-air, solid block per XZ column is rendered.
-    This avoids spawning hundreds of thousands of parts for a full chunk.
-  • Each surface block becomes a BLOCK_SIZE-stud Part coloured and
-    material-matched to the BlockRegistry definition.
-  • All parts for a chunk live inside a Folder named "Chunk_cx,cz" under
-    Workspace.World.ActiveChunks, making them easy to destroy later.
-
-  WHERE init() IS CALLED:
-    ClientMain.client.lua (StarterPlayerScripts) calls ChunkRenderer.init()
-    during the client boot sequence right after the module is loaded.
+  • Parts are created in batches across frames to avoid lag spikes.
+  • Incoming chunks are queued and processed one at a time so multiple
+    arriving chunks don't all hammer the engine simultaneously.
+  • The finished folder is parented in one shot at the end of each render
+    so the chunk appears atomically rather than part-by-part.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,176 +24,223 @@ local ChunkSerializer = require(WorldFolder:WaitForChild("ChunkSerializer"))
 local BlockRegistry   = require(WorldFolder:WaitForChild("BlockRegistry"))
 local ChunkConstants  = require(WorldFolder:WaitForChild("ChunkConstants"))
 
-local CHUNK_SIZE  = ChunkConstants.CHUNK_SIZE    -- 32
-local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT -- 128
-local BLOCK_SIZE  = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
+local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 5
+local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT  -- 128
+local BLOCK_SIZE   = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
 
--- Parent folder for all rendered chunk geometry
+-- How many parts to create per frame during a render pass.
+-- Raise for faster load, lower if you still see frame dips. 128 is a safe start.
+local RENDER_BATCH_SIZE = 128
+
 local _activeChunksFolder
+local _renderedChunks = {}  -- chunkKey → Folder
+
+-- Queue of deserialized chunk objects waiting to be rendered
+local _renderQueue   = {}
+local _queueRunning  = false
 
 local ChunkRenderer = {}
 
--- Track rendered chunk folders: chunkKey → Folder
-local _renderedChunks = {}
+-- ────────────────────────────────────────────────────────────────────────────
+-- Helpers
+-- ────────────────────────────────────────────────────────────────────────────
 
 local function chunkKey(cx, cz)
-	return cx .. "," .. cz
+  return cx .. "," .. cz
 end
 
--- ────────────────────────────────────────────────────────────────────────────
--- Rendering helpers
--- ────────────────────────────────────────────────────────────────────────────
-
---- _getMaterial: Safely resolve a Roblox Material enum from a name string.
 local function _getMaterial(name)
-	local ok, mat = pcall(function()
-		return Enum.Material[name]
-	end)
-	return (ok and mat) or Enum.Material.SmoothPlastic
+  local ok, mat = pcall(function() return Enum.Material[name] end)
+  return (ok and mat) or Enum.Material.SmoothPlastic
 end
 
---- _renderChunk: Build surface Parts for a deserialized ChunkData.
-local function _renderChunk(chunk)
-	local key = chunkKey(chunk.cx, chunk.cz)
-	if _renderedChunks[key] then
-		-- Already rendered — skip duplicate sends
-		return
-	end
+-- ────────────────────────────────────────────────────────────────────────────
+-- Batched rendering
+-- ────────────────────────────────────────────────────────────────────────────
 
-	-- World-space origin (studs) of this chunk
-	local originX = chunk.cx * CHUNK_SIZE * BLOCK_SIZE
-	local originZ = chunk.cz * CHUNK_SIZE * BLOCK_SIZE
+--- _buildSurfaceList: Walk the chunk once and collect all surface block data.
+-- Returns a flat array of {wx, wy, wz, def} so the render loop is just
+-- creating parts — no per-part chunk lookups or branching.
+local function _buildSurfaceList(chunk)
+  local originX = chunk.cx * CHUNK_SIZE * BLOCK_SIZE
+  local originZ = chunk.cz * CHUNK_SIZE * BLOCK_SIZE
+  local list = {}
 
-	-- Folder to hold this chunk's parts
-	local folder = Instance.new("Folder")
-	folder.Name   = "Chunk_" .. key
-	folder.Parent = _activeChunksFolder
+  for x = 0, CHUNK_SIZE - 1 do
+    for z = 0, CHUNK_SIZE - 1 do
+      for y = CHUNK_HEIGHT - 1, 0, -1 do
+        local id = chunk:getBlock(x, y, z)
+        if id ~= 0 then
+          local def = BlockRegistry.getById(id)
+          if def and def.solid then
+            list[#list + 1] = {
+              wx  = originX + x * BLOCK_SIZE + BLOCK_SIZE / 2,
+              wy  = y * BLOCK_SIZE + BLOCK_SIZE / 2,
+              wz  = originZ + z * BLOCK_SIZE + BLOCK_SIZE / 2,
+              def = def,
+            }
+          end
+          break  -- only surface block needed per column
+        end
+      end
+    end
+  end
 
-	local partCount = 0
-	for x = 0, CHUNK_SIZE - 1 do
-		for z = 0, CHUNK_SIZE - 1 do
-			-- Find the highest non-air block in this column
-			local surfaceY  = -1
-			local surfaceId = 0
-			for y = CHUNK_HEIGHT - 1, 0, -1 do
-				local id = chunk:getBlock(x, y, z)
-				if id ~= 0 then
-					surfaceY  = y
-					surfaceId = id
-					break
-				end
-			end
+  return list
+end
 
-			if surfaceY >= 0 then
-				local def = BlockRegistry.getById(surfaceId)
-				if def and def.solid then
-					local part          = Instance.new("Part")
-					part.Name           = def.name
-					part.Size           = Vector3.new(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
-					part.Anchored       = true
-					part.CanCollide     = true
-					part.CastShadow     = true
-					part.Material       = _getMaterial(def.material)
-					part.Color          = def.color
-					part.CFrame         = CFrame.new(
-						originX + x * BLOCK_SIZE + BLOCK_SIZE / 2,
-						surfaceY * BLOCK_SIZE + BLOCK_SIZE / 2,
-						originZ + z * BLOCK_SIZE + BLOCK_SIZE / 2
-					)
-					part.Parent  = folder
-					partCount    = partCount + 1
-				end
-			end
-		end
-	end
+--- _renderChunkAsync: Build parts in RENDER_BATCH_SIZE increments across frames.
+-- The folder is kept detached until the very end so the workspace doesn't
+-- have to process hundreds of individual parent changes.
+local function _renderChunkAsync(chunk)
+  local key = chunkKey(chunk.cx, chunk.cz)
+  if _renderedChunks[key] then return end  -- already rendered
 
-	_renderedChunks[key] = folder
+  local surfaceList = _buildSurfaceList(chunk)
 
-	print(string.format(
-		"[ChunkRenderer] Chunk (%d,%d) rendered — %d surface parts",
-		chunk.cx, chunk.cz, partCount
-	))
+  -- Build into a detached folder — zero workspace cost until we parent it
+  local folder = Instance.new("Folder")
+  folder.Name = "Chunk_" .. key
+
+  local partCount = 0
+  for i, entry in ipairs(surfaceList) do
+    local def  = entry.def
+    local part = Instance.new("Part")
+    part.Name      = def.name
+    part.Size      = Vector3.new(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
+    part.Anchored  = true
+    part.CanCollide = true
+    part.CastShadow = true
+    part.Material  = _getMaterial(def.material)
+    part.Color     = def.color
+    part.CFrame    = CFrame.new(entry.wx, entry.wy, entry.wz)
+    part.Parent    = folder   -- parent to detached folder, not workspace
+    partCount      = partCount + 1
+
+    -- Yield every RENDER_BATCH_SIZE parts to spread work across frames
+    if i % RENDER_BATCH_SIZE == 0 then
+      task.wait()
+      -- Abort if the chunk was unloaded while we were building it
+      if _renderedChunks[key] == false then
+        folder:Destroy()
+        return
+      end
+    end
+  end
+
+  -- If unloaded while we were mid-render, throw away the folder
+  if _renderedChunks[key] == false then
+    folder:Destroy()
+    return
+  end
+
+  -- Parent the whole folder in one shot — chunk appears atomically
+  folder.Parent = _activeChunksFolder
+  _renderedChunks[key] = folder
+
+  print(string.format(
+    "[ChunkRenderer] Chunk (%d,%d) rendered — %d surface parts",
+    chunk.cx, chunk.cz, partCount
+  ))
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Render queue — processes one chunk at a time so simultaneous arrivals
+-- don't all start hammering Instance.new on the same frame
+-- ────────────────────────────────────────────────────────────────────────────
+
+local function _processQueue()
+  if _queueRunning then return end
+  _queueRunning = true
+
+  task.spawn(function()
+    while #_renderQueue > 0 do
+      local chunk = table.remove(_renderQueue, 1)
+      _renderChunkAsync(chunk)   -- yields internally across frames
+    end
+    _queueRunning = false
+  end)
+end
+
+local function _enqueueChunk(chunk)
+  local key = chunkKey(chunk.cx, chunk.cz)
+  -- Don't queue if already rendered or already queued for unload
+  if _renderedChunks[key] then return end
+  _renderQueue[#_renderQueue + 1] = chunk
+  _processQueue()
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- Public API
 -- ────────────────────────────────────────────────────────────────────────────
 
---- init: Connect to the SendChunk RemoteEvent and begin listening for chunks.
--- Called by ClientMain during client boot (StarterPlayerScripts/ClientMain.client.lua).
-function ChunkRenderer.init()
-	print("[ChunkRenderer] Initialising…")
+function ChunkRenderer.unloadChunk(cx, cz)
+  local key = chunkKey(cx, cz)
+  local folder = _renderedChunks[key]
 
-	-- Resolve the ActiveChunks folder
-	_activeChunksFolder = Workspace
-		:WaitForChild("World")
-		:WaitForChild("ActiveChunks")
+  -- Mark as false immediately so any in-progress render pass aborts
+  _renderedChunks[key] = false
 
-	-- Wait for the server to expose the SendChunk RemoteEvent
-	local Remotes  = ReplicatedStorage:WaitForChild("Remotes")
-	local WorldRem = Remotes:WaitForChild("World")
-	local remote   = WorldRem:WaitForChild("SendChunk", 10)
+  -- Remove from the render queue if it hasn't been built yet
+  for i = #_renderQueue, 1, -1 do
+    local c = _renderQueue[i]
+    if c.cx == cx and c.cz == cz then
+      table.remove(_renderQueue, i)
+    end
+  end
 
-	if not remote then
-		warn("[ChunkRenderer] SendChunk RemoteEvent not found after 10s timeout — rendering disabled.")
-		return
-	end
-
-	remote.OnClientEvent:Connect(function(payload)
-		local ok, result = pcall(ChunkSerializer.deserialize, payload)
-		if not ok then
-			warn("[ChunkRenderer] Deserialize error: " .. tostring(result))
-			return
-		end
-		-- Render on next frame to keep the connection handler responsive
-		task.spawn(_renderChunk, result)
-	end)
-
-	-- Connect the UnloadChunk remote so the server can remove out-of-range chunks
-	local unloadRemote = WorldRem:WaitForChild("UnloadChunk", 10)
-	if unloadRemote then
-		unloadRemote.OnClientEvent:Connect(function(cx, cz)
-			ChunkRenderer.unloadChunk(cx, cz)
-		end)
-		print("[ChunkRenderer] Listening for UnloadChunk events ✓")
-	else
-		warn("[ChunkRenderer] UnloadChunk RemoteEvent not found after 10s timeout — unloading disabled.")
-	end
-
-	print("[ChunkRenderer] Listening for SendChunk events ✓")
+  if folder and typeof(folder) == "Instance" then
+    -- Unparent instantly — chunk vanishes from view and physics on this frame.
+    -- No per-child loop needed; Destroy() on the folder handles all descendants.
+    folder.Parent = nil
+    task.defer(function()
+      folder:Destroy()
+      if _renderedChunks[key] == false then
+        _renderedChunks[key] = nil
+      end
+      print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", cx, cz))
+    end)
+  else
+    _renderedChunks[key] = nil
+  end
 end
 
--- Number of parts to destroy per frame during chunk unload.
--- Spreading destruction across frames prevents single-frame lag spikes.
-local UNLOAD_BATCH_SIZE = 64
+function ChunkRenderer.init()
+  print("[ChunkRenderer] Initialising…")
 
---- unloadChunk: Remove a rendered chunk from the workspace.
--- Parts are destroyed in batches across multiple frames to avoid a lag spike.
--- @param cx  number
--- @param cz  number
-function ChunkRenderer.unloadChunk(cx, cz)
-	local key = chunkKey(cx, cz)
-	local folder = _renderedChunks[key]
-	if folder then
-		_renderedChunks[key] = nil
-		-- Unparent immediately so the chunk disappears from view right away,
-		-- then destroy its children in small batches to avoid a frame stall.
-		folder.Parent = nil
-		local logCx, logCz = cx, cz
-		task.spawn(function()
-			local children = folder:GetChildren()
-			for i, child in ipairs(children) do
-				if child.Parent then
-					child:Destroy()
-				end
-				if i % UNLOAD_BATCH_SIZE == 0 then
-					task.wait()
-				end
-			end
-			folder:Destroy()
-			print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", logCx, logCz))
-		end)
-	end
+  _activeChunksFolder = Workspace
+    :WaitForChild("World")
+    :WaitForChild("ActiveChunks")
+
+  local Remotes  = ReplicatedStorage:WaitForChild("Remotes")
+  local WorldRem = Remotes:WaitForChild("World")
+  local remote   = WorldRem:WaitForChild("SendChunk", 10)
+
+  if not remote then
+    warn("[ChunkRenderer] SendChunk RemoteEvent not found after 10s — rendering disabled.")
+    return
+  end
+
+  remote.OnClientEvent:Connect(function(payload)
+    local ok, result = pcall(ChunkSerializer.deserialize, payload)
+    if not ok then
+      warn("[ChunkRenderer] Deserialize error: " .. tostring(result))
+      return
+    end
+    _enqueueChunk(result)
+  end)
+
+  local unloadRemote = WorldRem:WaitForChild("UnloadChunk", 10)
+  if unloadRemote then
+    unloadRemote.OnClientEvent:Connect(function(cx, cz)
+      ChunkRenderer.unloadChunk(cx, cz)
+    end)
+    print("[ChunkRenderer] Listening for UnloadChunk events ✓")
+  else
+    warn("[ChunkRenderer] UnloadChunk RemoteEvent not found after 10s — unloading disabled.")
+  end
+
+  print("[ChunkRenderer] Listening for SendChunk events ✓")
 end
 
 return ChunkRenderer
