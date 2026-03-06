@@ -45,37 +45,64 @@ local ChunkGenerator = {}
 
 --- generateFlat: Generate flat terrain for the given chunk.
 -- All columns get the same vertical profile; biome is uniform.
+--
+-- Optimization notes
+-- ------------------
+-- • The biome pass and block pass are merged into a single x,z loop to avoid
+--   iterating over all CHUNK_SIZE² columns twice.
+-- • Blocks are written directly into chunk.blocks and chunk.biomes rather than
+--   going through setBlock/setBiome.  This eliminates:
+--     – per-call bounds checks (we know x,y,z are in range)
+--     – per-call dirty = true assignments (redundant during generation)
+--     – per-call os.time() calls (~5,000+ for a 9×9 chunk at SURFACE_Y=64)
+-- • The column base index (for fixed x,z varying y) is pre-computed outside
+--   the y-loop so the inner loop only does one addition and one multiplication.
+-- • markClean() is still called at the end to clear the dirty flag that
+--   ChunkData.new sets (lastModified is set once at construction time).
+--
 -- @param cx  number  Chunk X in world grid
 -- @param cz  number  Chunk Z in world grid
 -- @return ChunkData
 function ChunkGenerator.generateFlat(cx, cz)
-	local chunk = ChunkData.new(cx, cz)
+	local chunk  = ChunkData.new(cx, cz)
+	local blocks = chunk.blocks
+	local biomes = chunk.biomes
+	local S      = CHUNK_SIZE
+	local H      = CHUNK_HEIGHT
 
-	-- Set all columns to the same biome
-	for x = 0, CHUNK_SIZE - 1 do
-		for z = 0, CHUNK_SIZE - 1 do
-			chunk:setBiome(x, z, DEFAULT_BIOME_ID)
-		end
-	end
+	-- Pre-compute reused values to keep the inner loop tight
+	local surfY   = SURFACE_Y          -- grass Y
+	local surfM1  = SURFACE_Y - 1      -- dirt Y
+	local surfM2  = SURFACE_Y - 2      -- top stone Y
 
-	-- Fill every XZ column with the flat profile
-	for x = 0, CHUNK_SIZE - 1 do
-		for z = 0, CHUNK_SIZE - 1 do
-			-- Bedrock layer
-			chunk:setBlock(x, 0, z, ID_BEDROCK)
+	-- Index formula (mirrors ChunkData._toIndex, 1-based):
+	--   index(x,y,z) = x*(H*S) + y*S + z + 1
+	-- For a fixed (x,z) column the y=0 base is  x*(H*S) + z + 1
+	-- and each successive y adds S to the index.
+	for x = 0, S - 1 do
+		local xStride = x * (H * S)
+		for z = 0, S - 1 do
+			-- Biome: write directly, no bounds check needed
+			biomes[x * S + z + 1] = DEFAULT_BIOME_ID
 
-			-- Stone layers (Y = 1 … SURFACE_Y - 2)
-			for y = 1, SURFACE_Y - 2 do
-				chunk:setBlock(x, y, z, ID_STONE)
+			-- Column base index (y = 0)
+			local base = xStride + z + 1
+
+			-- Bedrock at Y = 0
+			blocks[base] = ID_BEDROCK
+
+			-- Stone: Y = 1 … SURFACE_Y - 2
+			for y = 1, surfM2 do
+				blocks[base + y * S] = ID_STONE
 			end
 
-			-- Dirt layer
-			chunk:setBlock(x, SURFACE_Y - 1, z, ID_DIRT)
+			-- Dirt at Y = SURFACE_Y - 1
+			blocks[base + surfM1 * S] = ID_DIRT
 
-			-- Grass surface
-			chunk:setBlock(x, SURFACE_Y, z, ID_GRASS)
+			-- Grass at Y = SURFACE_Y
+			blocks[base + surfY * S] = ID_GRASS
 
-			-- Everything above is air (already 0 from ChunkData.new)
+			-- Y > SURFACE_Y: already 0 (air) — table.create(VOLUME, 0) in ChunkData.new
 		end
 	end
 
