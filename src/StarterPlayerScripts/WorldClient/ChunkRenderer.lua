@@ -30,7 +30,7 @@ local ChunkConstants  = require(WorldFolder:WaitForChild("ChunkConstants"))
 
 local CHUNK_SIZE  = ChunkConstants.CHUNK_SIZE    -- 32
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT -- 128
-local BLOCK_SIZE  = 4  -- studs per block (visual scale)
+local BLOCK_SIZE  = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
 
 -- Parent folder for all rendered chunk geometry
 local _activeChunksFolder
@@ -152,6 +152,17 @@ function ChunkRenderer.init()
 		-- Render on next frame to keep the connection handler responsive
 		task.spawn(_renderChunk, result)
 	end)
+
+	-- Connect the UnloadChunk remote so the server can remove out-of-range chunks
+	local unloadRemote = WorldRem:WaitForChild("UnloadChunk", 10)
+	if unloadRemote then
+		unloadRemote.OnClientEvent:Connect(function(cx, cz)
+			ChunkRenderer.unloadChunk(cx, cz)
+		end)
+		print("[ChunkRenderer] Listening for UnloadChunk events ✓")
+	else
+		warn("[ChunkRenderer] UnloadChunk RemoteEvent not found after 10s timeout — unloading disabled.")
+	end
 
 	print("[ChunkRenderer] Listening for SendChunk events ✓")
 end

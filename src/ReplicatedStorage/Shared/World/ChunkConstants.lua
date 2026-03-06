@@ -10,6 +10,9 @@ local ChunkConstants = {}
 ChunkConstants.CHUNK_SIZE   = 32
 ChunkConstants.CHUNK_HEIGHT = 128  -- vertical slices per chunk column
 
+-- Studs per voxel block (visual scale, must match ChunkRenderer)
+ChunkConstants.BLOCK_SIZE   = 4
+
 -- How many chunks away from the player are kept loaded
 ChunkConstants.RENDER_DISTANCE = 8   -- in chunk units
 
