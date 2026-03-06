@@ -51,14 +51,27 @@ local function boot()
     Logger.log("INFO", "Registered: " .. name)
   end
 
+  -- ── World subsystem boot (ChunkService + StreamingService) ──────────────
+  -- Called here so remotes exist before any player can join.
+  -- WHERE: GameManager.server.lua → WorldManager.init()
+  services.WorldManager.init()
+  Logger.log("INFO", "[GameManager] WorldManager initialised ✓")
+
+  -- ── Player lifecycle hooks ───────────────────────────────────────────────
   Players.PlayerAdded:Connect(function(p)
     services.PlayerManager.onPlayerAdded(p)
+    -- WHERE: this is where chunk streaming begins for every joining player.
+    services.WorldManager.onPlayerAdded(p)
   end)
   Players.PlayerRemoving:Connect(function(p)
     services.PlayerManager.onPlayerRemoving(p)
+    services.WorldManager.onPlayerRemoving(p)
   end)
   for _, p in ipairs(Players:GetPlayers()) do
-    task.spawn(services.PlayerManager.onPlayerAdded, p)
+    task.spawn(function()
+      services.PlayerManager.onPlayerAdded(p)
+      services.WorldManager.onPlayerAdded(p)
+    end)
   end
 
   Logger.log("INFO", "[GameManager] Server READY ✓")
