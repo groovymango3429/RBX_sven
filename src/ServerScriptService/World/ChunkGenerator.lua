@@ -18,8 +18,11 @@
   1. A low-frequency *continental* noise (CONT_SCALE) defines broad elevation
      zones — ocean basin, plains, rolling hills, mountain ranges.  The value
      is smoothstepped to sharpen the transitions between zones.
-  2. Three detail octaves add local variation whose magnitude is *scaled by
-     elevation²*, ensuring plains stay flat while mountains stay rugged.
+  2. Six fBm detail octaves (lacunarity=2.0, persistence=0.5) add local
+     variation whose magnitude is *scaled by elevation²*, ensuring plains
+     stay flat while mountains stay rugged.  Using six octaves covering
+     feature widths from ~200 down to ~6 blocks eliminates the spherical
+     blob / stripe artefacts that arise with only a few widely-spaced octaves.
 
   Surface block selection by height  (thresholds from NoiseConfig.TERRAIN)
   ----------------------------------
@@ -77,10 +80,12 @@ local SNOW_HEIGHT  = T.SNOW_HEIGHT
 local ROCK_HEIGHT  = T.ROCK_HEIGHT
 local GRASS_HEIGHT = T.GRASS_HEIGHT
 
--- Amplitude sum used to normalise the detail octaves to ~[-0.5, 0.5].
--- With each octave in ~[-0.5, 0.5], the weighted sum is in ~[-AMP_SUM*0.5,
--- AMP_SUM*0.5].  Dividing by AMP_SUM normalises the result back to [-0.5, 0.5].
-local AMP_SUM = T.AMP_1 + T.AMP_2 + T.AMP_3
+-- Amplitude sum used to normalise the fBm detail octaves to ~[-0.5, 0.5].
+-- Sum all octave amplitudes once at module load time.
+local AMP_SUM = 0
+for _, oct in ipairs(T.OCTAVES) do
+	AMP_SUM = AMP_SUM + oct.amp
+end
 
 local ChunkGenerator = {}
 
@@ -94,8 +99,9 @@ local ChunkGenerator = {}
 -- Two-stage approach:
 --   1. Continental noise → elevation zone [0,1] (smoothstepped for sharp
 --      transitions between ocean / plains / hills / mountains).
---   2. Three detail octaves add local variation whose magnitude is scaled
---      by elevation² so plains are flat and mountains are rugged.
+--   2. Six fBm octaves (lacunarity=2.0, persistence=0.5) add local variation
+--      whose magnitude is scaled by elevation² so plains are flat and
+--      mountains are rugged.
 local function _getHeight(wx, wz)
 	-- ── Stage 1: continental zone ────────────────────────────────────────
 	-- Low-frequency noise → remap ~[-0.5, 0.5] to [0, 1]
@@ -105,15 +111,15 @@ local function _getHeight(wx, wz)
 	-- Smoothstep: sharpens zone edges so transitions aren't too gradual
 	elevation = elevation * elevation * (3 - 2 * elevation)
 
-	-- ── Stage 2: detail octaves ──────────────────────────────────────────
-	local n1 = math.noise(wx * T.SCALE_1, wz * T.SCALE_1, T.SEED_1)
-	local n2 = math.noise(wx * T.SCALE_2, wz * T.SCALE_2, T.SEED_2)
-	local n3 = math.noise(wx * T.SCALE_3, wz * T.SCALE_3, T.SEED_3)
-
-	-- Normalise detail to ~[-0.5, 0.5]:
-	-- Each octave returns ~[-0.5, 0.5]; the weighted sum is in
-	-- ~[-AMP_SUM*0.5, AMP_SUM*0.5], so dividing by AMP_SUM yields ~[-0.5, 0.5].
-	local detail = (n1 * T.AMP_1 + n2 * T.AMP_2 + n3 * T.AMP_3) / AMP_SUM
+	-- ── Stage 2: fBm detail octaves ──────────────────────────────────────
+	-- Stack all octaves; each doubles frequency and halves amplitude.
+	-- The weighted sum lies in ~[-AMP_SUM*0.5, AMP_SUM*0.5]; dividing by
+	-- AMP_SUM normalises back to ~[-0.5, 0.5].
+	local detail = 0
+	for _, oct in ipairs(T.OCTAVES) do
+		detail = detail + math.noise(wx * oct.scale, wz * oct.scale, oct.seed) * oct.amp
+	end
+	detail = detail / AMP_SUM
 
 	-- ── Combine ──────────────────────────────────────────────────────────
 	-- elevation sets the base height zone; detail adds variation scaled by
