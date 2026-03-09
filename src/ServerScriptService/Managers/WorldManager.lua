@@ -7,7 +7,11 @@
   Call chain for player join:
     GameManager (Players.PlayerAdded) → WorldManager.onPlayerAdded(player)
       → ChunkService.onPlayerAdded(player)        (register chunk subscriptions)
-      → StreamingService.onPlayerAdded(player)    (stream initial chunks to client)
+      → StreamingService.onPlayerAdded(player)    (no-op; generation is button-triggered)
+
+  Map generation no longer happens automatically on player join.
+  The client fires RequestMapGeneration when the player clicks the generate
+  button; StreamingService handles that event and streams all chunks at once.
 ]]
 
 local ReplicatedStorage   = game:GetService("ReplicatedStorage")
