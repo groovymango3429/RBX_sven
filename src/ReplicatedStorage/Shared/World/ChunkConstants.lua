@@ -20,7 +20,7 @@ ChunkConstants.BLOCK_SIZE   = 4
 
 -- How many chunks away from the player are kept loaded
 -- RENDER_DISTANCE=8 → (2×8+1)²=289 chunks in view per player
-ChunkConstants.RENDER_DISTANCE = 4   -- in chunk units
+ChunkConstants.RENDER_DISTANCE = 8   -- in chunk units
 
 -- LOD tier thresholds (distance in chunks)
 -- Tier 0 = full detail, Tier 1 = simplified mesh, Tier 2 = billboard / impostor
@@ -30,8 +30,9 @@ ChunkConstants.LOD_TIER_2 = 8
 
 -- Maximum number of chunks held in the server LRU cache before eviction.
 -- Must exceed (2×RENDER_DISTANCE+1)² = 289 so a single player's full view fits.
--- 400 gives comfortable headroom for multiple overlapping player views.
-ChunkConstants.MAX_CACHE_SIZE = 400
+-- 1200 gives comfortable headroom for multiple overlapping player views with
+-- RENDER_DISTANCE=8 (289 chunks per player).
+ChunkConstants.MAX_CACHE_SIZE = 1200
 
 -- Maximum dirty (modified) chunks flushed to DataStore per interval
 ChunkConstants.DIRTY_FLUSH_BATCH = 16

@@ -1,7 +1,7 @@
 --[[
   ChunkGenerator  [MODULE SCRIPT]
   ==============
-  Procedural terrain generation using multi-octave Perlin noise.
+  Procedural terrain generation using continental noise + multi-octave Perlin.
 
   Terrain layout per column  (H = noise-derived surface height)
   -------------------------------------------------------------
@@ -10,14 +10,28 @@
     Y = H-DEPTH+1 … H-2 → Stone
     Y = H-1             → Sub-surface block (dirt / sand / stone)
     Y = H               → Surface block     (grass / sand / stone / snow)
-    Y > H               → Air
+    Y = H+1 … WATER_LVL → Water (only when H < WATER_LEVEL)
+    Y > max(H, WATER_LVL) → Air
+
+  Height shaping (two-stage)
+  --------------------------
+  1. A low-frequency *continental* noise (CONT_SCALE) defines broad elevation
+     zones — ocean basin, plains, rolling hills, mountain ranges.  The value
+     is smoothstepped to sharpen the transitions between zones.
+  2. Three detail octaves add local variation whose magnitude is *scaled by
+     elevation²*, ensuring plains stay flat while mountains stay rugged.
 
   Surface block selection by height  (thresholds from NoiseConfig.TERRAIN)
   ----------------------------------
     H ≥ SNOW_HEIGHT  → Snow   (high mountain)
     H ≥ ROCK_HEIGHT  → Stone  (rocky hillside)
-    H ≥ GRASS_HEIGHT → Grass  (plains)
-    H < GRASS_HEIGHT → Sand   (lowland / beach)
+    H ≥ GRASS_HEIGHT → Grass  (plains / hills)
+    H < GRASS_HEIGHT → Sand   (beach / lake floor)
+
+  Water fill
+  ----------
+  When H < WATER_LEVEL, the column is filled with water from H+1 up to
+  WATER_LEVEL, creating lakes and low-lying water regions naturally.
 
   Performance notes
   -----------------
@@ -48,6 +62,7 @@ local ID_DIRT    = BlockRegistry.getId("dirt")     -- 2
 local ID_GRASS   = BlockRegistry.getId("grass")    -- 1
 local ID_SAND    = BlockRegistry.getId("sand")     -- 4
 local ID_SNOW    = BlockRegistry.getId("snow")     -- 18
+local ID_WATER   = BlockRegistry.getId("water")    -- 11
 
 -- Default biome ID (0 = plains / default)
 local DEFAULT_BIOME_ID = 0
@@ -57,12 +72,14 @@ local T           = NoiseConfig.TERRAIN
 local HEIGHT_MIN  = T.HEIGHT_MIN
 local HEIGHT_MAX  = T.HEIGHT_MAX
 local DEPTH       = T.UNDERGROUND_DEPTH
+local WATER_LEVEL = T.WATER_LEVEL
 local SNOW_HEIGHT  = T.SNOW_HEIGHT
 local ROCK_HEIGHT  = T.ROCK_HEIGHT
 local GRASS_HEIGHT = T.GRASS_HEIGHT
 
--- Amplitude sum used to normalise the combined noise to [0, 1].
--- math.noise returns ~[-0.5, 0.5], so combined range is ±AMP_SUM*0.5.
+-- Amplitude sum used to normalise the detail octaves to ~[-0.5, 0.5].
+-- With each octave in ~[-0.5, 0.5], the weighted sum is in ~[-AMP_SUM*0.5,
+-- AMP_SUM*0.5].  Dividing by AMP_SUM normalises the result back to [-0.5, 0.5].
 local AMP_SUM = T.AMP_1 + T.AMP_2 + T.AMP_3
 
 local ChunkGenerator = {}
@@ -73,16 +90,37 @@ local ChunkGenerator = {}
 
 --- _getHeight: Sample the noise heightmap at world position (wx, wz).
 -- Returns an integer block Y clamped to [HEIGHT_MIN, HEIGHT_MAX].
+--
+-- Two-stage approach:
+--   1. Continental noise → elevation zone [0,1] (smoothstepped for sharp
+--      transitions between ocean / plains / hills / mountains).
+--   2. Three detail octaves add local variation whose magnitude is scaled
+--      by elevation² so plains are flat and mountains are rugged.
 local function _getHeight(wx, wz)
+	-- ── Stage 1: continental zone ────────────────────────────────────────
+	-- Low-frequency noise → remap ~[-0.5, 0.5] to [0, 1]
+	local nc        = math.noise(wx * T.CONT_SCALE, wz * T.CONT_SCALE, T.CONT_SEED)
+	local elevation = math.clamp(nc + 0.5, 0, 1)
+
+	-- Smoothstep: sharpens zone edges so transitions aren't too gradual
+	elevation = elevation * elevation * (3 - 2 * elevation)
+
+	-- ── Stage 2: detail octaves ──────────────────────────────────────────
 	local n1 = math.noise(wx * T.SCALE_1, wz * T.SCALE_1, T.SEED_1)
 	local n2 = math.noise(wx * T.SCALE_2, wz * T.SCALE_2, T.SEED_2)
 	local n3 = math.noise(wx * T.SCALE_3, wz * T.SCALE_3, T.SEED_3)
 
-	-- Weighted sum; each octave in ~[-0.5, 0.5]
-	local combined = n1 * T.AMP_1 + n2 * T.AMP_2 + n3 * T.AMP_3
+	-- Normalise detail to ~[-0.5, 0.5]:
+	-- Each octave returns ~[-0.5, 0.5]; the weighted sum is in
+	-- ~[-AMP_SUM*0.5, AMP_SUM*0.5], so dividing by AMP_SUM yields ~[-0.5, 0.5].
+	local detail = (n1 * T.AMP_1 + n2 * T.AMP_2 + n3 * T.AMP_3) / AMP_SUM
 
-	-- Normalise from [-AMP_SUM*0.5, AMP_SUM*0.5] → [0, 1]
-	local t = (combined + AMP_SUM * 0.5) / AMP_SUM
+	-- ── Combine ──────────────────────────────────────────────────────────
+	-- elevation sets the base height zone; detail adds variation scaled by
+	-- elevation² so low-elevation areas stay flat (good for water / plains)
+	-- while high-elevation areas are maximally rugged (good for mountains).
+	local t = elevation + detail * (0.08 + elevation * elevation * 0.55)
+	t = math.clamp(t, 0, 1)
 
 	-- Map to [HEIGHT_MIN, HEIGHT_MAX]
 	return math.clamp(
@@ -166,7 +204,18 @@ function ChunkGenerator.generateNoise(cx, cz)
 				blocks[base + surfH * S] = _getSurfaceBlock(surfH)
 			end
 
-			-- Y > surfH is already 0 (air) — table.create(VOLUME, 0) in ChunkData.new
+			-- ── Water fill (columns below sea level) ──────────────────────
+			-- surfH < GRASS_HEIGHT already ensures sand surface/sub-surface,
+			-- so we only need to place the water blocks above the floor.
+			-- WATER_LEVEL (50) is always well below CHUNK_HEIGHT (128),
+			-- so no upper-bound clamp against H is required here.
+			if surfH < WATER_LEVEL then
+				for y = surfH + 1, WATER_LEVEL do
+					blocks[base + y * S] = ID_WATER
+				end
+			end
+
+			-- Y > max(surfH, WATER_LEVEL) is already 0 (air)
 		end
 	end
 
