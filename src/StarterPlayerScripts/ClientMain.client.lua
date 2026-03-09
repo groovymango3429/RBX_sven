@@ -35,12 +35,26 @@ local function boot()
   local ChunkRenderer    = load(WorldClient, "ChunkRenderer")
   local WeatherRenderer  = load(WorldClient, "WeatherRenderer")
   local DayNightRenderer = load(WorldClient, "DayNightRenderer")
+  local MapLoader        = load(WorldClient, "MapLoader")
 
   -- Initialise ChunkRenderer so it begins listening for SendChunk events.
   -- WHERE: ClientMain.client.lua → ChunkRenderer.init()
   --   This connects OnClientEvent for the SendChunk remote so terrain
   --   appears as soon as the server fires chunks at this client.
   ChunkRenderer.init()
+
+  -- MapLoader wires a ScreenGui button to server-side map generation.
+  -- Call MapLoader.setup(config) from a separate LocalScript (or here) and
+  -- pass in references to your button, loading frame, and loading bar.
+  -- See MapLoader.lua for full documentation and usage examples.
+  -- Example:
+  --   local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+  --   local myGui     = playerGui:WaitForChild("MapScreenGui")
+  --   MapLoader.setup({
+  --     button       = myGui:WaitForChild("GenerateButton"),
+  --     loadingFrame = myGui:WaitForChild("LoadingFrame"),
+  --     loadingBar   = myGui:WaitForChild("LoadingFrame"):WaitForChild("BarFill"),
+  --   })
 
   -- Combat
   local CombatClient = script.Parent:WaitForChild("CombatClient")
@@ -70,6 +84,7 @@ local function boot()
   ClientServiceLocator.register("UIManager",           UIManager)
   ClientServiceLocator.register("HUDController",       HUDController)
   ClientServiceLocator.register("ChunkRenderer",       ChunkRenderer)
+  ClientServiceLocator.register("MapLoader",           MapLoader)
   ClientServiceLocator.register("WeaponClient",        WeaponClient)
   ClientServiceLocator.register("AudioClient",         AudioClient)
   ClientServiceLocator.register("MusicController",     MusicController)
