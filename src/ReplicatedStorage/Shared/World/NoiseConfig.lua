@@ -13,10 +13,16 @@
        near 1 → highland plateaus and mountain ranges
      The continent value is smoothstepped to sharpen zone transitions.
 
-  2. Detail octaves (three-octave Perlin stack)
-     Adds local terrain variation on top of the continental base.
-     The contribution of detail is *scaled* by elevation² so that:
-       • plains stay genuinely flat (small detail contribution)
+  2. fBm detail octaves  (OCTAVES table)
+     Six layers of Perlin noise stacked with lacunarity = 2.0 and
+     persistence = 0.5 — each layer doubles the spatial frequency and
+     halves the amplitude.  The full stack (fractional Brownian motion)
+     covers feature sizes from ~200 blocks down to ~6 blocks, which
+     breaks up the spherical blob / stripe artefacts that arise when only
+     a handful of widely-spaced octaves are used.
+
+     The combined detail value is *scaled* by elevation² so that:
+       • plains stay genuinely flat  (small detail contribution)
        • mountains receive full roughness (large detail contribution)
 
   Water fill
@@ -36,24 +42,27 @@ NoiseConfig.TERRAIN = {
 	CONT_SCALE = 0.003,
 	CONT_SEED  = 42,
 
-	-- ── Octave 1: regional terrain (large-scale valleys & ridges) ────────
-	-- Note: CONT_SCALE handles continent-scale features; SCALE_1 adds
-	-- regional variation (ridges, valleys) within those larger zones.
-	SCALE_1 = 0.005,
-	AMP_1   = 1.0,
-	SEED_1  = 0,
-
-	-- ── Octave 2: rolling hills / medium features ────────────────────────
-	SCALE_2 = 0.02,
-	AMP_2   = 0.35,   -- reduced from 0.9 so hills don't dominate everywhere
-	SEED_2  = 100,
-
-	-- ── Octave 3: small terrain detail ───────────────────────────────────
-	-- Slightly lower frequency than before (0.09→0.08) to smooth micro-bumps
-	-- now that AMP_2 is smaller and less noise is needed for fine variation.
-	SCALE_3 = 0.08,
-	AMP_3   = 0.08,
-	SEED_3  = 200,
+	-- ── fBm detail octaves ───────────────────────────────────────────────
+	-- Six layers with lacunarity = 2.0 and persistence = 0.5.
+	-- Each entry doubles the spatial frequency and halves the amplitude,
+	-- giving the classic fBm character that eliminates blobs and stripes.
+	--
+	--   Octave │ Scale   │ Amplitude │ Feature width
+	--   ───────┼─────────┼───────────┼───────────────────────────────────
+	--     1    │ 0.005   │ 1.000     │ ~200 blocks  (regional ridges/valleys)
+	--     2    │ 0.010   │ 0.500     │ ~100 blocks  (large hills)
+	--     3    │ 0.020   │ 0.250     │  ~50 blocks  (rolling hills)
+	--     4    │ 0.040   │ 0.125     │  ~25 blocks  (medium bumps)
+	--     5    │ 0.080   │ 0.0625    │  ~12 blocks  (small detail)
+	--     6    │ 0.160   │ 0.03125   │   ~6 blocks  (micro surface texture)
+	OCTAVES = {
+		{ scale = 0.005,  amp = 1.000,   seed = 0   },
+		{ scale = 0.010,  amp = 0.500,   seed = 100 },
+		{ scale = 0.020,  amp = 0.250,   seed = 200 },
+		{ scale = 0.040,  amp = 0.125,   seed = 300 },
+		{ scale = 0.080,  amp = 0.0625,  seed = 400 },
+		{ scale = 0.160,  amp = 0.03125, seed = 500 },
+	},
 
 	-- ── Terrain vertical range ───────────────────────────────────────────
 	HEIGHT_MIN = 38,   -- lowered to leave room for water below WATER_LEVEL
