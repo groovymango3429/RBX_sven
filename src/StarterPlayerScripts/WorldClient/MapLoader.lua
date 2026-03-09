@@ -61,6 +61,8 @@ local _requestRemote  = WorldRem:WaitForChild("RequestMapGeneration", 10)
 -- Remote used by the server to report per-chunk progress (done, total).
 local _progressRemote = WorldRem:WaitForChild("MapGenProgress",       10)
 
+-- (no client debug logging by default)
+
 if not _requestRemote then
 	warn("[MapLoader] RequestMapGeneration RemoteEvent not found — map generation disabled.")
 end
