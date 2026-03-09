@@ -20,7 +20,7 @@ ChunkConstants.BLOCK_SIZE   = 4
 
 -- How many chunks away from the player are kept loaded
 -- RENDER_DISTANCE=8 → (2×8+1)²=289 chunks in view per player
-ChunkConstants.RENDER_DISTANCE = 8   -- in chunk units
+ChunkConstants.RENDER_DISTANCE = 4   -- in chunk units
 
 -- LOD tier thresholds (distance in chunks)
 -- Tier 0 = full detail, Tier 1 = simplified mesh, Tier 2 = billboard / impostor
