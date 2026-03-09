@@ -17,12 +17,12 @@
   --------------------------
   1. A low-frequency *continental* noise (CONT_SCALE) defines broad elevation
      zones — ocean basin, plains, rolling hills, mountain ranges.  The value
-     is smoothstepped to sharpen the transitions between zones.
+     is linearly mapped (no smoothstep) so transitions stay gradual and
+     zone boundaries don't produce harsh blob-like plateaus.
   2. Six fBm detail octaves (lacunarity=2.0, persistence=0.5) add local
      variation whose magnitude is *scaled by elevation²*, ensuring plains
-     stay flat while mountains stay rugged.  Octave scales start at 0.020
-     (not 0.005) so the dominant octave creates ~50-block hills rather than
-     ~200-block blobs, eliminating the spherical / pillow-hill artefact.
+     stay flat while mountains receive modest extra roughness.  The elevation²
+     coefficient is kept small (0.25) to avoid sharp mountain spikes.
   3. A small always-on base-detail layer (BASE_SCALE/BASE_AMP/BASE_SEED) is
      added without elevation scaling to texture flat areas and prevent the
      horizontal banding / stripe artefact on gentle grass slopes.
@@ -113,8 +113,8 @@ local function _getHeight(wx, wz)
 	local nc        = math.noise(wx * T.CONT_SCALE, wz * T.CONT_SCALE, T.CONT_SEED)
 	local elevation = math.clamp(nc + 0.5, 0, 1)
 
-	-- Smoothstep: sharpens zone edges so transitions aren't too gradual
-	elevation = elevation * elevation * (3 - 2 * elevation)
+	-- Smoothstep removed: using linear elevation mapping prevents the large
+	-- flat-zone "blobs" caused by clustering values near 0 and 1.
 
 	-- ── Stage 2: fBm detail octaves ──────────────────────────────────────
 	-- Stack all octaves; each doubles frequency and halves amplitude.
@@ -134,9 +134,12 @@ local function _getHeight(wx, wz)
 
 	-- ── Combine ──────────────────────────────────────────────────────────
 	-- elevation sets the base height zone; scaled detail adds roughness
-	-- proportional to elevation² (flat plains, rugged mountains);
+	-- proportional to elevation² (flat plains, rolling mountains).
+	-- Coefficient reduced (0.55 → 0.25) to smooth out mountain spikes:
+	--   plains  (elev≈0.5): detail × (0.05 + 0.25×0.25) ≈ ±5 block variation
+	--   mountains (elev≈1): detail × (0.05 +  1×0.25)   ≈ ±12 block variation
 	-- baseDetail always adds a tiny amount of surface texture everywhere.
-	local t = elevation + detail * (0.08 + elevation * elevation * 0.55) + baseDetail
+	local t = elevation + detail * (0.05 + elevation * elevation * 0.25) + baseDetail
 	t = math.clamp(t, 0, 1)
 
 	-- Map to [HEIGHT_MIN, HEIGHT_MAX]
