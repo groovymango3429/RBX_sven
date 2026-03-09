@@ -18,6 +18,14 @@
     so the chunk appears atomically rather than part-by-part.
   • Chunk unloading destroys children in small batches spread across frames
     to prevent single-frame stalls when many parts are removed at once.
+
+  Render-completion tracking
+  --------------------------
+  Call ChunkRenderer.setExpectedChunks(n) before generation starts so the
+  renderer knows how many chunks to expect.  Once all n chunks have been
+  rendered, the callback registered via ChunkRenderer.setOnAllRendered(fn)
+  is fired once and cleared.  This lets MapLoader hide the loading screen
+  only after all terrain has actually appeared on screen.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,6 +56,13 @@ local _renderedChunks = {}  -- chunkKey → Folder
 -- Queue of deserialized chunk objects waiting to be rendered
 local _renderQueue   = {}
 local _queueRunning  = false
+
+-- ── Render-completion tracking ───────────────────────────────────────────────
+-- Set by MapLoader (via setExpectedChunks / setOnAllRendered) so the loading
+-- screen is hidden only after all chunks have actually been drawn on screen.
+local _expectedTotal        = 0
+local _renderedCount        = 0
+local _onAllRenderedCallback = nil
 
 local ChunkRenderer = {}
 
@@ -174,6 +189,19 @@ local function _renderChunkAsync(chunk)
   folder.Parent = _activeChunksFolder
   _renderedChunks[key] = folder
 
+  -- Track how many chunks have finished rendering.
+  -- When the expected total is reached, fire the completion callback so the
+  -- loading screen can be hidden after all terrain is visible.
+  _renderedCount = _renderedCount + 1
+  if _onAllRenderedCallback
+    and _expectedTotal > 0
+    and _renderedCount >= _expectedTotal
+  then
+    local cb = _onAllRenderedCallback
+    _onAllRenderedCallback = nil  -- clear before calling to prevent re-entry
+    cb()
+  end
+
   print(string.format(
     "[ChunkRenderer] Chunk (%d,%d) rendered — %d surface parts",
     chunk.cx, chunk.cz, partCount
@@ -246,6 +274,29 @@ function ChunkRenderer.unloadChunk(cx, cz)
     end)
   else
     _renderedChunks[key] = nil
+  end
+end
+
+--- setExpectedChunks: Tell the renderer how many chunks to expect for this
+-- generation pass.  Resets the rendered counter so progress is tracked from 0.
+-- Call this from MapLoader (via connectRenderer) when a new generation starts.
+-- @param n  number  Total number of chunks that will be sent
+function ChunkRenderer.setExpectedChunks(n)
+  _expectedTotal        = n
+  _renderedCount        = 0
+  _onAllRenderedCallback = nil
+end
+
+--- setOnAllRendered: Register a callback that fires once when all expected
+-- chunks have finished rendering.  The callback is cleared after it fires.
+-- @param fn  function  Called with no arguments when rendering is complete
+function ChunkRenderer.setOnAllRendered(fn)
+  _onAllRenderedCallback = fn
+  -- If all chunks were already rendered before this was set (edge case),
+  -- fire immediately so the loading screen is never stuck open.
+  if _expectedTotal > 0 and _renderedCount >= _expectedTotal then
+    _onAllRenderedCallback = nil
+    fn()
   end
 end
 
