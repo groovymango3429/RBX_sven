@@ -2,22 +2,20 @@
   ChunkRenderer  [MODULE SCRIPT]
   =============
   Receives serialized chunk payloads from the server via the SendChunk
-  RemoteEvent and renders surface terrain as BaseParts in the Workspace.
+  RemoteEvent and renders terrain using the Roblox Terrain API for smooth,
+  continuous geometry instead of discrete cube parts.
 
-  Phase 1 rendering strategy
-  --------------------------
-  • Only blocks on the boundary between solid and air are rendered.
-    A block is a boundary block when it has at least one solid neighbor
-    AND at least one air neighbor (any of the 6 axis-aligned directions).
-    This is equivalent to the visible surface of the solid volume and avoids
-    spawning parts for fully-buried interior blocks.
-  • Parts are created in batches across frames to avoid lag spikes.
+  Smooth terrain rendering strategy
+  ----------------------------------
+  • Each chunk's block data is translated into Roblox Terrain voxels using
+    workspace.Terrain:WriteVoxels(), producing smooth and natural-looking
+    hills, mountains, and valleys.
+  • Block IDs are mapped to Terrain materials (Grass, Rock, Sand, Snow, etc.)
+    so biome colouring is preserved.
+  • Chunk unloading clears the corresponding terrain region by writing all-air
+    voxels with workspace.Terrain:FillBlock().
   • Incoming chunks are queued and processed one at a time so multiple
-    arriving chunks don't all hammer the engine simultaneously.
-  • The finished folder is parented in one shot at the end of each render
-    so the chunk appears atomically rather than part-by-part.
-  • Chunk unloading destroys children in small batches spread across frames
-    to prevent single-frame stalls when many parts are removed at once.
+    arriving chunks don't hammer the Terrain API on the same frame.
 
   Render-completion tracking
   --------------------------
@@ -35,23 +33,13 @@ local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder = Shared:WaitForChild("World")
 
 local ChunkSerializer = require(WorldFolder:WaitForChild("ChunkSerializer"))
-local BlockRegistry   = require(WorldFolder:WaitForChild("BlockRegistry"))
 local ChunkConstants  = require(WorldFolder:WaitForChild("ChunkConstants"))
 
-local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 5
+local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 9
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT  -- 128
 local BLOCK_SIZE   = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
 
--- How many parts to create per frame during a render pass.
--- Raise for faster load, lower if you still see frame dips. 128 is a safe start.
-local RENDER_BATCH_SIZE = 128
-
--- How many parts to destroy per frame during a chunk unload.
--- Spreading destruction across frames prevents single-frame lag spikes.
-local UNLOAD_BATCH_SIZE = 64
-
-local _activeChunksFolder
-local _renderedChunks = {}  -- chunkKey → Folder
+local _renderedChunks = {}  -- chunkKey → true (rendered) | false (unloading/aborted) | nil (not loaded)
 
 -- Queue of deserialized chunk objects waiting to be rendered
 local _renderQueue   = {}
@@ -74,120 +62,86 @@ local function chunkKey(cx, cz)
   return cx .. "," .. cz
 end
 
-local function _getMaterial(name)
-  local ok, mat = pcall(function() return Enum.Material[name] end)
-  return (ok and mat) or Enum.Material.SmoothPlastic
-end
-
--- ────────────────────────────────────────────────────────────────────────────
--- Boundary detection
--- ────────────────────────────────────────────────────────────────────────────
-
--- The 6 axis-aligned unit-step offsets used for neighbor checks.
--- Stored as plain {dx,dy,dz} tables to avoid Vector3 allocation overhead.
-local _NEIGHBOR_OFFSETS = {
-  { 1, 0, 0}, {-1, 0, 0},
-  { 0, 1, 0}, { 0,-1, 0},
-  { 0, 0, 1}, { 0, 0,-1},
+-- Maps block IDs to Roblox Terrain materials for smooth voxel rendering.
+-- Block IDs not in this table fall back to Enum.Material.Rock.
+local _BLOCK_TO_TERRAIN = {
+  [0]  = Enum.Material.Air,     -- air
+  [1]  = Enum.Material.Grass,   -- grass
+  [2]  = Enum.Material.Ground,  -- dirt
+  [3]  = Enum.Material.Rock,    -- stone
+  [4]  = Enum.Material.Sand,    -- sand
+  [5]  = Enum.Material.Ground,  -- gravel
+  [10] = Enum.Material.Rock,    -- bedrock
+  [17] = Enum.Material.Ground,  -- clay
+  [18] = Enum.Material.Snow,    -- snow
 }
 
---- _isOnBoundary: Return true when solid block (x,y,z) touches at least one
--- air block.  Must only be called on known-solid blocks.
--- ChunkData:getBlock() already returns 0 for out-of-bounds coordinates, so
--- chunk edges are treated as air automatically.
-local function _isOnBoundary(chunk, x, y, z)
-  for _, off in ipairs(_NEIGHBOR_OFFSETS) do
-    if chunk:getBlock(x + off[1], y + off[2], z + off[3]) == 0 then
-      return true
-    end
-  end
-  return false
+local function _getTerrainMaterial(id)
+  return _BLOCK_TO_TERRAIN[id] or Enum.Material.Rock
 end
 
--- ────────────────────────────────────────────────────────────────────────────
--- Batched rendering
--- ────────────────────────────────────────────────────────────────────────────
+--- _renderChunkAsync: Write chunk voxel data to Roblox Terrain via WriteVoxels.
+-- Translates block IDs into Terrain materials and occupancy values, then
+-- writes the entire chunk in one API call, producing smooth continuous terrain.
+local function _renderChunkAsync(chunk)
+  local key = chunkKey(chunk.cx, chunk.cz)
+  if _renderedChunks[key] then return end  -- already rendered
 
---- _buildSurfaceList: Walk the chunk once and collect all boundary block data.
--- A boundary block is any solid block that has at least one air neighbor,
--- i.e. the visible surface of the solid volume.
--- Returns a flat array of {wx, wy, wz, def} so the render loop is just
--- creating parts — no per-part chunk lookups or branching.
-local function _buildSurfaceList(chunk)
   local originX = chunk.cx * CHUNK_SIZE * BLOCK_SIZE
   local originZ = chunk.cz * CHUNK_SIZE * BLOCK_SIZE
-  local list = {}
+  local S = CHUNK_SIZE
+  local H = CHUNK_HEIGHT
 
-  for x = 0, CHUNK_SIZE - 1 do
-    for z = 0, CHUNK_SIZE - 1 do
-      for y = 0, CHUNK_HEIGHT - 1 do
-        local id = chunk:getBlock(x, y, z)
+  -- Build materials and occupancy 3D arrays indexed [x][y][z] (1-based).
+  -- Each entry covers one BLOCK_SIZE³ voxel in Roblox Terrain.
+  local materials = table.create(S)
+  local occupancy = table.create(S)
+
+  for xi = 1, S do
+    materials[xi] = table.create(H)
+    occupancy[xi] = table.create(H)
+    for yi = 1, H do
+      materials[xi][yi] = table.create(S)
+      occupancy[xi][yi] = table.create(S)
+      for zi = 1, S do
+        -- ChunkData uses 0-based (x,y,z); convert from 1-based loop indices.
+        local id = chunk:getBlock(xi - 1, yi - 1, zi - 1)
         if id ~= 0 then
-          local def = BlockRegistry.getById(id)
-          if def and def.solid and _isOnBoundary(chunk, x, y, z) then
-            list[#list + 1] = {
-              wx  = originX + x * BLOCK_SIZE + BLOCK_SIZE / 2,
-              wy  = y * BLOCK_SIZE + BLOCK_SIZE / 2,
-              wz  = originZ + z * BLOCK_SIZE + BLOCK_SIZE / 2,
-              def = def,
-            }
-          end
+          materials[xi][yi][zi] = _getTerrainMaterial(id)
+          occupancy[xi][yi][zi] = 1
+        else
+          materials[xi][yi][zi] = Enum.Material.Air
+          occupancy[xi][yi][zi] = 0
         end
       end
     end
   end
 
-  return list
-end
+  -- Abort if the chunk was unloaded while we were building the arrays.
+  if _renderedChunks[key] == false then return end
 
---- _renderChunkAsync: Build parts in RENDER_BATCH_SIZE increments across frames.
--- The folder is kept detached until the very end so the workspace doesn't
--- have to process hundreds of individual parent changes.
-local function _renderChunkAsync(chunk)
-  local key = chunkKey(chunk.cx, chunk.cz)
-  if _renderedChunks[key] then return end  -- already rendered
+  -- Write all voxels to Roblox Terrain in a single call for smooth geometry.
+  local region = Region3.new(
+    Vector3.new(originX, 0, originZ),
+    Vector3.new(originX + S * BLOCK_SIZE, H * BLOCK_SIZE, originZ + S * BLOCK_SIZE)
+  )
+  workspace.Terrain:WriteVoxels(region, BLOCK_SIZE, materials, occupancy)
 
-  local surfaceList = _buildSurfaceList(chunk)
-
-  -- Build into a detached folder — zero workspace cost until we parent it
-  local folder = Instance.new("Folder")
-  folder.Name = "Chunk_" .. key
-
-  local partCount = 0
-  for i, entry in ipairs(surfaceList) do
-    local def  = entry.def
-    local part = Instance.new("Part")
-    part.Name      = def.name
-    part.Size      = Vector3.new(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
-    part.Anchored  = true
-    part.CanCollide = true
-    part.CastShadow = true
-    part.Material  = _getMaterial(def.material)
-    part.Color     = def.color
-    part.CFrame    = CFrame.new(entry.wx, entry.wy, entry.wz)
-    part.Parent    = folder   -- parent to detached folder, not workspace
-    partCount      = partCount + 1
-
-    -- Yield every RENDER_BATCH_SIZE parts to spread work across frames
-    if i % RENDER_BATCH_SIZE == 0 then
-      task.wait()
-      -- Abort if the chunk was unloaded while we were building it
-      if _renderedChunks[key] == false then
-        folder:Destroy()
-        return
-      end
-    end
-  end
-
-  -- If unloaded while we were mid-render, throw away the folder
+  -- Abort check after write: if unloaded mid-write, clear the terrain we placed.
   if _renderedChunks[key] == false then
-    folder:Destroy()
+    workspace.Terrain:FillBlock(
+      CFrame.new(
+        originX + S * BLOCK_SIZE * 0.5,
+        H * BLOCK_SIZE * 0.5,
+        originZ + S * BLOCK_SIZE * 0.5
+      ),
+      Vector3.new(S * BLOCK_SIZE, H * BLOCK_SIZE, S * BLOCK_SIZE),
+      Enum.Material.Air
+    )
     return
   end
 
-  -- Parent the whole folder in one shot — chunk appears atomically
-  folder.Parent = _activeChunksFolder
-  _renderedChunks[key] = folder
+  _renderedChunks[key] = true
 
   -- Track how many chunks have finished rendering.
   -- When the expected total is reached, fire the completion callback so the
@@ -203,14 +157,14 @@ local function _renderChunkAsync(chunk)
   end
 
   print(string.format(
-    "[ChunkRenderer] Chunk (%d,%d) rendered — %d surface parts",
-    chunk.cx, chunk.cz, partCount
+    "[ChunkRenderer] Chunk (%d,%d) rendered as smooth terrain",
+    chunk.cx, chunk.cz
   ))
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- Render queue — processes one chunk at a time so simultaneous arrivals
--- don't all start hammering Instance.new on the same frame
+-- don't all call WriteVoxels on the same frame
 -- ────────────────────────────────────────────────────────────────────────────
 
 local function _processQueue()
@@ -220,7 +174,8 @@ local function _processQueue()
   task.spawn(function()
     while #_renderQueue > 0 do
       local chunk = table.remove(_renderQueue, 1)
-      _renderChunkAsync(chunk)   -- yields internally across frames
+      _renderChunkAsync(chunk)   -- runs synchronously for this chunk; queue yields between chunks
+      task.wait()
     end
     _queueRunning = false
   end)
@@ -240,12 +195,11 @@ end
 
 function ChunkRenderer.unloadChunk(cx, cz)
   local key = chunkKey(cx, cz)
-  local folder = _renderedChunks[key]
 
-  -- Mark as false immediately so any in-progress render pass aborts
+  -- Mark as false immediately so any in-progress render pass aborts.
   _renderedChunks[key] = false
 
-  -- Remove from the render queue if it hasn't been built yet
+  -- Remove from the render queue if it hasn't been built yet.
   for i = #_renderQueue, 1, -1 do
     local c = _renderQueue[i]
     if c.cx == cx and c.cz == cz then
@@ -253,28 +207,23 @@ function ChunkRenderer.unloadChunk(cx, cz)
     end
   end
 
-  if folder and typeof(folder) == "Instance" then
-    -- Unparent instantly — chunk vanishes from view and physics on this frame.
-    -- Destroy children in small batches spread across frames to avoid a lag spike.
-    folder.Parent = nil
-    local logCx, logCz = cx, cz
-    task.spawn(function()
-      local children = folder:GetChildren()
-      for i, child in ipairs(children) do
-        child:Destroy()
-        if i % UNLOAD_BATCH_SIZE == 0 then
-          task.wait()
-        end
-      end
-      folder:Destroy()
-      if _renderedChunks[key] == false then
-        _renderedChunks[key] = nil
-      end
-      print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", logCx, logCz))
-    end)
-  else
-    _renderedChunks[key] = nil
-  end
+  -- Clear the Roblox Terrain region for this chunk by filling it with Air.
+  local originX = cx * CHUNK_SIZE * BLOCK_SIZE
+  local originZ = cz * CHUNK_SIZE * BLOCK_SIZE
+  local S = CHUNK_SIZE
+  local H = CHUNK_HEIGHT
+  workspace.Terrain:FillBlock(
+    CFrame.new(
+      originX + S * BLOCK_SIZE * 0.5,
+      H * BLOCK_SIZE * 0.5,
+      originZ + S * BLOCK_SIZE * 0.5
+    ),
+    Vector3.new(S * BLOCK_SIZE, H * BLOCK_SIZE, S * BLOCK_SIZE),
+    Enum.Material.Air
+  )
+
+  _renderedChunks[key] = nil
+  print(string.format("[ChunkRenderer] Unloaded chunk (%d,%d)", cx, cz))
 end
 
 --- setExpectedChunks: Tell the renderer how many chunks to expect for this
@@ -301,11 +250,7 @@ function ChunkRenderer.setOnAllRendered(fn)
 end
 
 function ChunkRenderer.init()
-  print("[ChunkRenderer] Initialising…")
-
-  _activeChunksFolder = Workspace
-    :WaitForChild("World")
-    :WaitForChild("ActiveChunks")
+  print("[ChunkRenderer] Initialising (smooth Terrain mode)…")
 
   local Remotes  = ReplicatedStorage:WaitForChild("Remotes")
   local WorldRem = Remotes:WaitForChild("World")
