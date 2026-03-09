@@ -43,6 +43,13 @@ local function boot()
   --   appears as soon as the server fires chunks at this client.
   ChunkRenderer.init()
 
+  -- Connect ChunkRenderer to MapLoader so the loading screen stays visible
+  -- until all chunks have actually been drawn on screen (not just sent by the
+  -- server).  This makes the progress bar accurate across both phases:
+  --   Phase 1 (0→90 %): server generation — driven by MapGenProgress events.
+  --   Phase 2 (90→100 %): client rendering — driven by ChunkRenderer callbacks.
+  MapLoader.connectRenderer(ChunkRenderer)
+
   -- MapLoader wires a ScreenGui button to server-side map generation.
   -- Call MapLoader.setup(config) from a separate LocalScript (or here) and
   -- pass in references to your button, loading frame, and loading bar.

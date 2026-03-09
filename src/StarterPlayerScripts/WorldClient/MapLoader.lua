@@ -2,7 +2,8 @@
   MapLoader  [MODULE SCRIPT]
   =========
   Connects a player-supplied button to the server-side map generation system
-  and drives a loading-screen UI while all chunks are being streamed.
+  and drives a loading-screen UI while all chunks are being streamed AND
+  rendered on the client.
 
   ── How to use ──────────────────────────────────────────────────────────────
   Call MapLoader.setup(config) from any LocalScript, passing references to
@@ -26,6 +27,19 @@
       loadingFrame = myGui:WaitForChild("LoadingFrame"),
       loadingBar   = myGui:WaitForChild("LoadingFrame"):WaitForChild("BarFill"),
     })
+
+  ── Accurate loading bar ─────────────────────────────────────────────────────
+  The progress bar is split into two phases:
+    • Phase 1 (server generation, 0 → 90 %):
+        Driven by MapGenProgress events.  Each chunk sent = one tick.
+    • Phase 2 (client rendering, 90 → 100 %):
+        The loading screen stays visible until ChunkRenderer has finished
+        drawing every chunk.  Call MapLoader.connectRenderer(ChunkRenderer)
+        from ClientMain after both modules are initialised so MapLoader can
+        register a render-complete callback.
+
+  If connectRenderer() is never called the screen hides as soon as the
+  server finishes sending (original behaviour — safe fallback).
 
   ── config fields ────────────────────────────────────────────────────────────
     button       GuiButton | nil
@@ -72,7 +86,23 @@ end
 
 -- ────────────────────────────────────────────────────────────────────────────
 
+-- Optional ChunkRenderer reference set via connectRenderer().
+-- When present, the loading screen waits for all chunks to be rendered before
+-- hiding, giving an accurate two-phase progress bar.
+local _chunkRenderer = nil
+
+-- Brief pause (seconds) after the bar visually reaches 100 % before hiding
+-- the loading frame, so the player sees the completed bar.
+local LOADING_BAR_COMPLETION_DELAY = 0.15
+
 local MapLoader = {}
+
+--- connectRenderer: Link MapLoader to ChunkRenderer for render-phase tracking.
+-- Call this once from ClientMain after both modules are initialised.
+-- @param renderer  ChunkRenderer module (table with setExpectedChunks / setOnAllRendered)
+function MapLoader.connectRenderer(renderer)
+	_chunkRenderer = renderer
+end
 
 --- setup: Wire up UI elements to the map-generation system.
 -- @param config table
@@ -111,17 +141,36 @@ function MapLoader.setup(config)
 	end
 
 	-- ── Progress listener ─────────────────────────────────────────────────────
-	-- The server fires MapGenProgress(done, total) after each chunk is sent.
-	-- When done == total the loading screen is automatically hidden.
+	-- Phase 1: server fires MapGenProgress(done, total) after each chunk is sent.
+	--   → Bar fills from 0 to 90 %.
+	-- Phase 2: ChunkRenderer fires its onAllRendered callback when every chunk
+	--   has been drawn on screen.
+	--   → Bar completes to 100 % and loading screen is hidden.
 	if _progressRemote then
 		connections[#connections + 1] = _progressRemote.OnClientEvent:Connect(
 			function(done, total)
 				if total > 0 then
-					setProgress(done / total)
+					-- Phase 1: server generation fills 0 → 90 % of the bar.
+					setProgress((done / total) * 0.9)
 				end
+
 				if done >= total then
-					setLoadingVisible(false)
-					print("[MapLoader] Map generation complete ✓")
+					-- Server has sent all chunks.
+					if _chunkRenderer then
+						-- Phase 2: wait for ChunkRenderer to finish drawing them.
+						_chunkRenderer.setExpectedChunks(total)
+						_chunkRenderer.setOnAllRendered(function()
+							setProgress(1)
+							task.wait(LOADING_BAR_COMPLETION_DELAY)
+							setLoadingVisible(false)
+							print("[MapLoader] Map fully rendered ✓")
+						end)
+					else
+						-- Fallback: no renderer connected — hide immediately.
+						setProgress(1)
+						setLoadingVisible(false)
+						print("[MapLoader] Map generation complete ✓")
+					end
 				end
 			end
 		)
@@ -138,6 +187,10 @@ function MapLoader.setup(config)
 			end
 			setProgress(0)
 			setLoadingVisible(true)
+			-- Reset renderer state so a re-generation starts tracking from scratch.
+			if _chunkRenderer then
+				_chunkRenderer.setExpectedChunks(0)
+			end
 			_requestRemote:FireServer()
 			print("[MapLoader] Map generation requested.")
 		end)
@@ -168,6 +221,9 @@ function MapLoader.triggerGeneration(loadingFrame, loadingBar)
 	end
 	if loadingFrame then
 		loadingFrame.Visible = true
+	end
+	if _chunkRenderer then
+		_chunkRenderer.setExpectedChunks(0)
 	end
 	_requestRemote:FireServer()
 	print("[MapLoader] Map generation triggered programmatically.")
