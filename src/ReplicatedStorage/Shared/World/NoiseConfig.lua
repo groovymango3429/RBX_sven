@@ -46,11 +46,10 @@ NoiseConfig.TERRAIN = {
 
 	-- ── Continental shaping ──────────────────────────────────────────────
 	-- Low frequency: creates large plains / highland / mountain zones.
-	-- CONT_SCALE = 0.012 → features ~83 blocks wide.
-	-- Raised from 0.003 (≈333-block world-sized blobs) to eliminate the
-	-- giant smooth sphere / pillow hills that dominate the landscape at
-	-- very low continental frequencies.
-	CONT_SCALE = 0.012,
+	-- CONT_SCALE = 0.016 → features ~62 blocks wide.
+	-- Raised from 0.012 (≈83-block blobs) to tighten continental features
+	-- and reduce the large rounded hill/blob appearance at mid frequencies.
+	CONT_SCALE = 0.016,
 	CONT_SEED  = 42,
 
 	-- ── fBm detail octaves ───────────────────────────────────────────────
