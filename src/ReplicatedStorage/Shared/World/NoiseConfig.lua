@@ -7,23 +7,31 @@
   Terrain height is computed in two stages:
 
   1. Continental noise  (CONT_SCALE / CONT_SEED)
-     A very low-frequency Perlin sample that drives an "elevation zone":
+     A low-frequency Perlin sample that drives an "elevation zone":
        near 0 → ocean basins / lowland water regions
        mid    → flat plains and rolling hills
        near 1 → highland plateaus and mountain ranges
      The continent value is smoothstepped to sharpen zone transitions.
+     CONT_SCALE = 0.012 gives features ~83 blocks wide — large enough for
+     distinct biome regions but small enough to avoid the world-sized
+     smooth sphere / blob hills produced by very low frequencies (0.003).
 
   2. fBm detail octaves  (OCTAVES table)
      Six layers of Perlin noise stacked with lacunarity = 2.0 and
      persistence = 0.5 — each layer doubles the spatial frequency and
-     halves the amplitude.  The full stack (fractional Brownian motion)
-     covers feature sizes from ~200 blocks down to ~6 blocks, which
-     breaks up the spherical blob / stripe artefacts that arise when only
-     a handful of widely-spaced octaves are used.
+     halves the amplitude.  Scales start at 0.020 (~50-block features),
+     not 0.005 (~200-block blobs), so the dominant octave produces
+     recognisable hills rather than giant spherical mounds.
 
      The combined detail value is *scaled* by elevation² so that:
        • plains stay genuinely flat  (small detail contribution)
        • mountains receive full roughness (large detail contribution)
+
+  3. Always-on base detail  (BASE_SCALE / BASE_AMP / BASE_SEED)
+     A small high-frequency layer that is added *without* any elevation
+     scaling.  This gives subtle surface texture to flat / low-elevation
+     areas and eliminates the horizontal banding / stripe artefact that
+     appears on very gentle slopes against Roblox voxel edges.
 
   Water fill
   ----------
@@ -37,32 +45,44 @@ local NoiseConfig = {}
 NoiseConfig.TERRAIN = {
 
 	-- ── Continental shaping ──────────────────────────────────────────────
-	-- Very low frequency: creates large plains / highland / mountain zones.
-	-- Features are ~1/CONT_SCALE blocks wide (≈333 blocks at 0.003).
-	CONT_SCALE = 0.003,
+	-- Low frequency: creates large plains / highland / mountain zones.
+	-- CONT_SCALE = 0.012 → features ~83 blocks wide.
+	-- Raised from 0.003 (≈333-block world-sized blobs) to eliminate the
+	-- giant smooth sphere / pillow hills that dominate the landscape at
+	-- very low continental frequencies.
+	CONT_SCALE = 0.012,
 	CONT_SEED  = 42,
 
 	-- ── fBm detail octaves ───────────────────────────────────────────────
 	-- Six layers with lacunarity = 2.0 and persistence = 0.5.
-	-- Each entry doubles the spatial frequency and halves the amplitude,
-	-- giving the classic fBm character that eliminates blobs and stripes.
+	-- Each entry doubles the spatial frequency and halves the amplitude.
+	-- Scales start at 0.020 (not 0.005) so the dominant octave produces
+	-- ~50-block hills instead of ~200-block blobs.
 	--
 	--   Octave │ Scale   │ Amplitude │ Feature width
 	--   ───────┼─────────┼───────────┼───────────────────────────────────
-	--     1    │ 0.005   │ 1.000     │ ~200 blocks  (regional ridges/valleys)
-	--     2    │ 0.010   │ 0.500     │ ~100 blocks  (large hills)
-	--     3    │ 0.020   │ 0.250     │  ~50 blocks  (rolling hills)
-	--     4    │ 0.040   │ 0.125     │  ~25 blocks  (medium bumps)
-	--     5    │ 0.080   │ 0.0625    │  ~12 blocks  (small detail)
-	--     6    │ 0.160   │ 0.03125   │   ~6 blocks  (micro surface texture)
+	--     1    │ 0.020   │ 1.000     │  ~50 blocks  (regional ridges/valleys)
+	--     2    │ 0.040   │ 0.500     │  ~25 blocks  (large hills)
+	--     3    │ 0.080   │ 0.250     │  ~12 blocks  (rolling hills)
+	--     4    │ 0.160   │ 0.125     │   ~6 blocks  (medium bumps)
+	--     5    │ 0.320   │ 0.0625    │   ~3 blocks  (small detail)
+	--     6    │ 0.640   │ 0.03125   │  ~1.5 blocks (micro surface texture)
 	OCTAVES = {
-		{ scale = 0.005,  amp = 1.000,   seed = 0   },
-		{ scale = 0.010,  amp = 0.500,   seed = 100 },
-		{ scale = 0.020,  amp = 0.250,   seed = 200 },
-		{ scale = 0.040,  amp = 0.125,   seed = 300 },
-		{ scale = 0.080,  amp = 0.0625,  seed = 400 },
-		{ scale = 0.160,  amp = 0.03125, seed = 500 },
+		{ scale = 0.020,  amp = 1.000,   seed = 0   },
+		{ scale = 0.040,  amp = 0.500,   seed = 100 },
+		{ scale = 0.080,  amp = 0.250,   seed = 200 },
+		{ scale = 0.160,  amp = 0.125,   seed = 300 },
+		{ scale = 0.320,  amp = 0.0625,  seed = 400 },
+		{ scale = 0.640,  amp = 0.03125, seed = 500 },
 	},
+
+	-- ── Always-on base detail ─────────────────────────────────────────────
+	-- A small high-frequency layer applied WITHOUT elevation scaling.
+	-- This gives subtle texture to flat/low-elevation areas and eliminates
+	-- the horizontal banding / stripe artefact on gentle grass slopes.
+	BASE_SCALE = 0.8,    -- ~1.25-block features (sub-voxel variation)
+	BASE_AMP   = 0.06,   -- small enough to be barely noticeable, big enough
+	BASE_SEED  = 600,    --   to break up all remaining perfect-smooth slopes
 
 	-- ── Terrain vertical range ───────────────────────────────────────────
 	HEIGHT_MIN = 38,   -- lowered to leave room for water below WATER_LEVEL

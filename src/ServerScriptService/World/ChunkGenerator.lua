@@ -20,9 +20,12 @@
      is smoothstepped to sharpen the transitions between zones.
   2. Six fBm detail octaves (lacunarity=2.0, persistence=0.5) add local
      variation whose magnitude is *scaled by elevation²*, ensuring plains
-     stay flat while mountains stay rugged.  Using six octaves covering
-     feature widths from ~200 down to ~6 blocks eliminates the spherical
-     blob / stripe artefacts that arise with only a few widely-spaced octaves.
+     stay flat while mountains stay rugged.  Octave scales start at 0.020
+     (not 0.005) so the dominant octave creates ~50-block hills rather than
+     ~200-block blobs, eliminating the spherical / pillow-hill artefact.
+  3. A small always-on base-detail layer (BASE_SCALE/BASE_AMP/BASE_SEED) is
+     added without elevation scaling to texture flat areas and prevent the
+     horizontal banding / stripe artefact on gentle grass slopes.
 
   Surface block selection by height  (thresholds from NoiseConfig.TERRAIN)
   ----------------------------------
@@ -96,12 +99,14 @@ local ChunkGenerator = {}
 --- _getHeight: Sample the noise heightmap at world position (wx, wz).
 -- Returns an integer block Y clamped to [HEIGHT_MIN, HEIGHT_MAX].
 --
--- Two-stage approach:
+-- Three-stage approach:
 --   1. Continental noise → elevation zone [0,1] (smoothstepped for sharp
 --      transitions between ocean / plains / hills / mountains).
 --   2. Six fBm octaves (lacunarity=2.0, persistence=0.5) add local variation
 --      whose magnitude is scaled by elevation² so plains are flat and
 --      mountains are rugged.
+--   3. Always-on base detail (tiny high-frequency layer, not elevation-scaled)
+--      adds micro-texture to flat areas and breaks up horizontal banding.
 local function _getHeight(wx, wz)
 	-- ── Stage 1: continental zone ────────────────────────────────────────
 	-- Low-frequency noise → remap ~[-0.5, 0.5] to [0, 1]
@@ -121,11 +126,17 @@ local function _getHeight(wx, wz)
 	end
 	detail = detail / AMP_SUM
 
+	-- ── Stage 3: always-on base detail ───────────────────────────────────
+	-- Small high-frequency layer added regardless of elevation.
+	-- Gives micro-texture to flat plains and eliminates the grass-stripe /
+	-- horizontal-banding artefact that appears on perfectly smooth slopes.
+	local baseDetail = math.noise(wx * T.BASE_SCALE, wz * T.BASE_SCALE, T.BASE_SEED) * T.BASE_AMP
+
 	-- ── Combine ──────────────────────────────────────────────────────────
-	-- elevation sets the base height zone; detail adds variation scaled by
-	-- elevation² so low-elevation areas stay flat (good for water / plains)
-	-- while high-elevation areas are maximally rugged (good for mountains).
-	local t = elevation + detail * (0.08 + elevation * elevation * 0.55)
+	-- elevation sets the base height zone; scaled detail adds roughness
+	-- proportional to elevation² (flat plains, rugged mountains);
+	-- baseDetail always adds a tiny amount of surface texture everywhere.
+	local t = elevation + detail * (0.08 + elevation * elevation * 0.55) + baseDetail
 	t = math.clamp(t, 0, 1)
 
 	-- Map to [HEIGHT_MIN, HEIGHT_MAX]
