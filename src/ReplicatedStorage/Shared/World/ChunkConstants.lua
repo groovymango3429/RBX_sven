@@ -12,7 +12,7 @@ local ChunkConstants = {}
 --   64 blocks of build headroom. Keeping this at 128 (not 400) reduces per-chunk
 --   voxel count from 32,400 to 10,368 — a 68% drop that cuts memory, serialization
 --   bandwidth, and generation time significantly.
-ChunkConstants.CHUNK_SIZE   = 9
+ChunkConstants.CHUNK_SIZE   = 16
 ChunkConstants.CHUNK_HEIGHT = 128  -- vertical slices per chunk column
 
 -- Studs per voxel block (visual scale, must match ChunkRenderer)
