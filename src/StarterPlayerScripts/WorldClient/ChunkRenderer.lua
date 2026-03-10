@@ -43,8 +43,10 @@ local BLOCK_SIZE   = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
 local ID_WATER     = BlockRegistry.getId("water")
 -- Keep the top material visibly present even when the sampled height lands
 -- very close to an integer voxel boundary; otherwise the full dirt voxel below
--- can dominate and create blotchy patches on grassy slopes.
-local MIN_SURFACE_OCCUPANCY = 0.35
+-- can dominate and create blotchy patches on grassy slopes. 35% occupancy is
+-- enough to keep the intended surface material visible without making the
+-- terrain feel unnaturally blocky.
+local SURFACE_OCCUPANCY_THRESHOLD = 0.35
 
 local _renderedChunks = {}  -- chunkKey → true (rendered) | false (unloading/aborted) | nil (not loaded)
 
@@ -91,8 +93,8 @@ end
 local function _getSurfaceOccupancy(height)
   local surfaceY = math.floor(height)
   local fractional = height - surfaceY
-  if fractional < MIN_SURFACE_OCCUPANCY then
-    fractional = MIN_SURFACE_OCCUPANCY
+  if fractional < SURFACE_OCCUPANCY_THRESHOLD then
+    fractional = SURFACE_OCCUPANCY_THRESHOLD
   end
   return surfaceY, math.clamp(fractional, 0, 1)
 end

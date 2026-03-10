@@ -27,6 +27,13 @@ local MAX_SPAWN_ATTEMPTS = 48
 local RECENT_SPAWN_LIMIT = 8
 local HEIGHT_BUCKET_SIZE = 12
 local GRASS_ID = BlockRegistry.getId("grass")
+local SEED_USER_MULTIPLIER = 131
+local SEED_ROLL_MULTIPLIER = 7919
+local RECENT_BUCKET_PENALTY_WEIGHT = 0.35
+local ELEVATION_SCORE_SCALE = 32
+local ELEVATION_SCORE_WEIGHT = 0.35
+local GRASS_SPAWN_PREFERENCE_BONUS = 0.05
+local FALLBACK_SURFACE_Y = 64
 local _spawnUnlocked = {}
 local _loadingCharacter = {}
 local _recentSpawnBuckets = {}
@@ -102,19 +109,11 @@ end
 local function getRecentSpawnPenalty(bucketKey)
   for i = #_recentSpawnBuckets, 1, -1 do
     if _recentSpawnBuckets[i] == bucketKey then
-      return (#_recentSpawnBuckets - i + 1) * 0.35
+      return (#_recentSpawnBuckets - i + 1) * RECENT_BUCKET_PENALTY_WEIGHT
     end
   end
 
   return 0
-end
-
-local function roundToBlock(value)
-  if value >= 0 then
-    return math.floor(value + 0.5)
-  end
-
-  return math.ceil(value - 0.5)
 end
 
 local function buildSpawnCandidate(rng, attempt)
@@ -123,14 +122,17 @@ local function buildSpawnCandidate(rng, attempt)
   local angle = rng:NextNumber(0, math.pi * 2)
   local radialBlend = math.max(rng:NextNumber(), attempt / MAX_SPAWN_ATTEMPTS)
   local radius = minRadius + (maxRadius - minRadius) * radialBlend
-  local blockX = mapConfig.SpawnBlockX + roundToBlock(math.cos(angle) * radius)
-  local blockZ = mapConfig.SpawnBlockZ + roundToBlock(math.sin(angle) * radius)
+  local blockX = mapConfig.SpawnBlockX + math.round(math.cos(angle) * radius)
+  local blockZ = mapConfig.SpawnBlockZ + math.round(math.sin(angle) * radius)
   return blockX, blockZ, radius, maxRadius
 end
 
 local function selectSpawnColumn(player)
-  _spawnRollCounter += 1
-  local seed = player.UserId * 131 + os.time() + _spawnRollCounter * 7919
+  _spawnRollCounter = _spawnRollCounter + 1
+  -- Mix a stable per-player factor with a changing roll counter so respawns do
+  -- not keep sampling the same terrain columns.
+  local timestampMillis = DateTime.now().UnixTimestampMillis
+  local seed = player.UserId * SEED_USER_MULTIPLIER + timestampMillis + _spawnRollCounter * SEED_ROLL_MULTIPLIER
   local rng = Random.new(seed)
   local bestCandidate = nil
 
@@ -145,11 +147,13 @@ local function selectSpawnColumn(player)
         local heightBucket = math.floor(surfaceBlockY / HEIGHT_BUCKET_SIZE)
         local bucketKey = tostring(surfaceId) .. ":" .. tostring(heightBucket)
         local score = (radius / maxRadius)
-          + math.min((surfaceBlockY - SEA_LEVEL) / 32, 1) * 0.35
+          -- Reward terrain that is comfortably above sea level without making
+          -- the selector over-prefer the tallest mountain peaks every time.
+          + math.min((surfaceBlockY - SEA_LEVEL) / ELEVATION_SCORE_SCALE, 1) * ELEVATION_SCORE_WEIGHT
           - getRecentSpawnPenalty(bucketKey)
 
         if surfaceId == GRASS_ID then
-          score += 0.05
+          score = score + GRASS_SPAWN_PREFERENCE_BONUS
         end
 
         local candidate = {
@@ -174,7 +178,7 @@ local function selectSpawnColumn(player)
 
   local fallbackCX, fallbackCZ, fallbackLocalX, fallbackLocalZ = getChunkCoords(mapConfig.SpawnBlockX, mapConfig.SpawnBlockZ)
   local fallbackChunk = ChunkService.requestChunk(fallbackCX, fallbackCZ, nil)
-  local surfaceBlockY = math.max(WorldConstants.SURFACE_Y_DEFAULT or 64, SEA_LEVEL + 2)
+  local surfaceBlockY = math.max(WorldConstants.SURFACE_Y_DEFAULT or FALLBACK_SURFACE_Y, SEA_LEVEL + 2)
   if fallbackChunk then
     surfaceBlockY = findSafeSurface(fallbackChunk, fallbackLocalX, fallbackLocalZ) or surfaceBlockY
   end

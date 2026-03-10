@@ -21,6 +21,15 @@ local terrainConfig = WorldGenConfig.Terrain
 local MIN_DETAIL_SCALE = terrainConfig.MinDetailScale
 local ELEVATION_DETAIL_FACTOR = terrainConfig.ElevationDetailFactor
 local MOUNTAIN_DETAIL_BOOST = terrainConfig.MountainDetailBoost
+-- Elevation is layered in three parts:
+-- 1) a broad continental base shared by all landforms,
+-- 2) a rolling-hill lift enabled by the landform mask,
+-- 3) an additional mountain lift reserved for the mountain mask.
+local BASE_ELEVATION_FLOOR = 0.16
+local CONTINENTAL_ELEVATION_WEIGHT = 0.34
+local HILL_ELEVATION_BASE = 0.08
+local HILL_ELEVATION_WEIGHT = 0.10
+local MOUNTAIN_ELEVATION_WEIGHT = 0.32
 
 NoiseConfig.TERRAIN = {
 
@@ -78,6 +87,8 @@ end
 
 local function inverseLerp(a, b, value)
 	if a == b then
+		-- A collapsed range means the corresponding mask is effectively disabled,
+		-- so fall back to 0 rather than inventing extra hill/mountain influence.
 		return 0
 	end
 
@@ -142,9 +153,9 @@ function NoiseConfig.GetHeight(x, z)
 
 	-- Plains stay broad and calm, hills get moderate variation, and only the
 	-- mountain mask unlocks the larger peaks/valleys.
-	local baseElevation = 0.16 + cont * 0.34
-	local rollingLift = hillMask * (0.08 + cont * 0.10)
-	local mountainLift = mountainMask * cont * cont * 0.32
+	local baseElevation = BASE_ELEVATION_FLOOR + cont * CONTINENTAL_ELEVATION_WEIGHT
+	local rollingLift = hillMask * (HILL_ELEVATION_BASE + cont * HILL_ELEVATION_WEIGHT)
+	local mountainLift = mountainMask * cont * cont * MOUNTAIN_ELEVATION_WEIGHT
 	local normalizedHeight = math.clamp(baseElevation + rollingLift + mountainLift, 0, 1)
 	local detailStrength = MIN_DETAIL_SCALE
 		+ hillMask * ELEVATION_DETAIL_FACTOR

@@ -77,6 +77,11 @@ local GRASS_HEIGHT = T.GRASS_HEIGHT
 local SHORE_HEIGHT_BAND = T.SHORE_HEIGHT_BAND
 local SURFACE_BLEND_BAND = T.SURFACE_BLEND_BAND
 local BEACH_CONTINENTALNESS = T.BEACH_CONTINENTALNESS
+-- Continentalness carries most of the inland/coastal signal, while the shore
+-- blend adds a smaller local push so beaches stay near water instead of
+-- appearing as isolated circular patches deeper inland.
+local CONTINENTALNESS_GRASS_WEIGHT = 0.85
+local SHORE_BLEND_GRASS_WEIGHT = 0.35
 
 local ChunkGenerator = {}
 
@@ -102,13 +107,19 @@ local function _getGrassBlend(h, continentalness)
 		1
 	)
 
-	return math.max(heightBlend, continentalness * 0.85 + shoreBlend * 0.35)
+	return math.max(
+		heightBlend,
+		continentalness * CONTINENTALNESS_GRASS_WEIGHT + shoreBlend * SHORE_BLEND_GRASS_WEIGHT
+	)
 end
 
 --- _getSurfaceBlock: Top block ID based on terrain height + continentalness.
 local function _getSurfaceBlock(h, continentalness)
 	if h >= SNOW_HEIGHT  then return ID_SNOW  end  -- mountain peak
 	if h >= ROCK_HEIGHT  then return ID_STONE end  -- rocky hillside
+
+	-- Keep sandy beaches concentrated to genuinely coastal / water-adjacent
+	-- lowlands while allowing sheltered inland valleys to stay grassy.
 	if h <= WATER_LEVEL + SHORE_HEIGHT_BAND and continentalness < BEACH_CONTINENTALNESS then
 		return ID_SAND
 	end
