@@ -79,7 +79,7 @@ local function sampleNoise(x, z, scale, seed)
 end
 
 local function clampHeight(cfg, height)
-	return math.clamp(math.floor(height + 0.5), cfg.HEIGHT_MIN, cfg.HEIGHT_MAX)
+	return math.clamp(height, cfg.HEIGHT_MIN, cfg.HEIGHT_MAX)
 end
 
 function NoiseConfig.GetContinentalness(x, z)
