@@ -69,11 +69,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Remotes  = ReplicatedStorage:WaitForChild("Remotes")
 local WorldRem = Remotes:WaitForChild("World")
+local Shared   = ReplicatedStorage:WaitForChild("Shared")
+local WorldFolder = Shared:WaitForChild("World")
+local ChunkConstants = require(WorldFolder:WaitForChild("ChunkConstants"))
 
 -- Remote used by the client to ask the server to start generation.
 local _requestRemote  = WorldRem:WaitForChild("RequestMapGeneration", 10)
 -- Remote used by the server to report per-chunk progress (done, total).
 local _progressRemote = WorldRem:WaitForChild("MapGenProgress",       10)
+local EXPECTED_CHUNK_COUNT = (ChunkConstants.RENDER_DISTANCE * 2 + 1) ^ 2
 
 -- (no client debug logging by default)
 
@@ -108,8 +112,13 @@ end
 -- @param config table
 --   {
 --     button       : GuiButton | nil,
+--     screenGui    : ScreenGui | nil,
+--     menuFrame    : GuiObject | nil,
+--     loadingScreen: GuiObject | nil,
 --     loadingFrame : GuiObject | nil,
 --     loadingBar   : GuiObject | nil,
+--     autoTrigger  : boolean | nil,
+--     onLoaded     : (() -> ()) | nil,
 --   }
 -- @return function  disconnect()
 function MapLoader.setup(config)
@@ -118,8 +127,14 @@ function MapLoader.setup(config)
 	local button       = config.button
 	local loadingFrame = config.loadingFrame
 	local loadingBar   = config.loadingBar
+	local loadingScreen = config.loadingScreen
+	local screenGui = config.screenGui
+	local menuFrame = config.menuFrame
+	local autoTrigger = config.autoTrigger
+	local onLoaded = config.onLoaded
 
 	local connections = {}
+	local didFinish = false
 
 	-- ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -135,9 +150,52 @@ function MapLoader.setup(config)
 
 	-- Show or hide the loading frame.
 	local function setLoadingVisible(visible)
+		if screenGui then
+			screenGui.Enabled = visible
+		end
+		if loadingScreen then
+			loadingScreen.Visible = visible
+		end
 		if loadingFrame then
 			loadingFrame.Visible = visible
 		end
+	end
+
+	local function setMenuVisible(visible)
+		if menuFrame then
+			menuFrame.Visible = visible
+		end
+	end
+
+	local function finishLoading()
+		if didFinish then
+			return
+		end
+
+		didFinish = true
+		setProgress(1)
+		task.wait(LOADING_BAR_COMPLETION_DELAY)
+		setLoadingVisible(false)
+		if onLoaded then
+			task.spawn(onLoaded)
+		end
+	end
+
+	local function beginGeneration()
+		if not _requestRemote then
+			warn("[MapLoader] RequestMapGeneration remote not found — cannot start generation.")
+			return
+		end
+
+		didFinish = false
+		setProgress(0)
+		setMenuVisible(false)
+		setLoadingVisible(true)
+		if _chunkRenderer then
+			_chunkRenderer.setExpectedChunks(EXPECTED_CHUNK_COUNT)
+		end
+		_requestRemote:FireServer()
+		print("[MapLoader] Map generation requested.")
 	end
 
 	-- ── Progress listener ─────────────────────────────────────────────────────
@@ -158,17 +216,13 @@ function MapLoader.setup(config)
 					-- Server has sent all chunks.
 					if _chunkRenderer then
 						-- Phase 2: wait for ChunkRenderer to finish drawing them.
-						_chunkRenderer.setExpectedChunks(total)
 						_chunkRenderer.setOnAllRendered(function()
-							setProgress(1)
-							task.wait(LOADING_BAR_COMPLETION_DELAY)
-							setLoadingVisible(false)
+							finishLoading()
 							print("[MapLoader] Map fully rendered ✓")
 						end)
 					else
 						-- Fallback: no renderer connected — hide immediately.
-						setProgress(1)
-						setLoadingVisible(false)
+						finishLoading()
 						print("[MapLoader] Map generation complete ✓")
 					end
 				end
@@ -180,22 +234,13 @@ function MapLoader.setup(config)
 	-- Clicking the button resets the bar, shows the loading frame, and asks
 	-- the server to start generating.
 	if button then
-		connections[#connections + 1] = button.Activated:Connect(function()
-			if not _requestRemote then
-				warn("[MapLoader] RequestMapGeneration remote not found — cannot start generation.")
-				return
-			end
-			setProgress(0)
-			setLoadingVisible(true)
-			-- Reset renderer state so a re-generation starts tracking from scratch.
-			if _chunkRenderer then
-				_chunkRenderer.setExpectedChunks(0)
-			end
-			_requestRemote:FireServer()
-			print("[MapLoader] Map generation requested.")
-		end)
+		connections[#connections + 1] = button.Activated:Connect(beginGeneration)
 	else
 		warn("[MapLoader] No button provided to MapLoader.setup() — click trigger disabled.")
+	end
+
+	if autoTrigger then
+		task.defer(beginGeneration)
 	end
 
 	-- ── Disconnect helper ─────────────────────────────────────────────────────
@@ -223,7 +268,7 @@ function MapLoader.triggerGeneration(loadingFrame, loadingBar)
 		loadingFrame.Visible = true
 	end
 	if _chunkRenderer then
-		_chunkRenderer.setExpectedChunks(0)
+		_chunkRenderer.setExpectedChunks(EXPECTED_CHUNK_COUNT)
 	end
 	_requestRemote:FireServer()
 	print("[MapLoader] Map generation triggered programmatically.")
