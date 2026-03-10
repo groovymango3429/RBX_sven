@@ -40,8 +40,8 @@ local function getTreesFolder()
 	
 	local world = Workspace:FindFirstChild("World")
 	if not world then
-		-- Create World folder if it doesn't exist
-		Logger.Warn("[TreeGenerationService] World folder not found in Workspace, creating it...")
+		-- Create World folder if it doesn't exist (expected on first run)
+		Logger.Info("[TreeGenerationService] World folder not found in Workspace, creating it...")
 		world = Instance.new("Folder")
 		world.Name = "World"
 		world.Parent = Workspace
