@@ -266,14 +266,43 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	end
 	
 	-- Position the tree (convert block coordinates to world position)
-	local worldPos = Vector3.new(wx * BLOCK_SIZE, wy * BLOCK_SIZE, wz * BLOCK_SIZE)
+	-- wy is provided as the block-level surface index (surfaceY + 1), so surface world Y is wy * BLOCK_SIZE
+	local surfaceWorldY = wy * BLOCK_SIZE
+
 	if tree.PrimaryPart then
-		-- Apply random Y-axis rotation
+		-- Compute model bottom relative to PrimaryPart so we can place the model's lowest point on the surface
+		local primaryCFrame = tree.PrimaryPart.CFrame
+		local minBottom = math.huge
+		for _, part in ipairs(tree:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local offset = primaryCFrame:ToObjectSpace(part.CFrame)
+				local bottom = offset.Position.Y - (part.Size.Y / 2)
+				if bottom < minBottom then
+					minBottom = bottom
+				end
+			end
+		end
+
+		if minBottom == math.huge then
+			-- No parts found for some reason; fallback to simple placement
+			minBottom = 0
+		end
+
+		-- Determine target PrimaryPart Y so that model bottom sits exactly on surfaceWorldY
+		local targetPrimaryY = surfaceWorldY - minBottom
+
+		-- Apply random Y-axis rotation and pivot PrimaryPart to the computed world position
 		local randomRotation = math.random() * 360
-		local rotatedCFrame = CFrame.new(worldPos) * CFrame.Angles(0, math.rad(randomRotation), 0)
-		tree:PivotTo(rotatedCFrame)
+		local targetCFrame = CFrame.new(wx * BLOCK_SIZE, targetPrimaryY, wz * BLOCK_SIZE) * CFrame.Angles(0, math.rad(randomRotation), 0)
+		tree:PivotTo(targetCFrame)
 	else
-		warn(string.format("[TreeSpawner] DEBUG: Tree '%s' still has no PrimaryPart after attempting to set one!", tree.Name))
+		-- If still no PrimaryPart, fallback to using model extents so tree base sits above surface
+		local extents = tree:GetExtentsSize()
+		local fallbackPrimaryY = surfaceWorldY + (extents.Y / 2)
+		local randomRotation = math.random() * 360
+		local fallbackCFrame = CFrame.new(wx * BLOCK_SIZE, fallbackPrimaryY, wz * BLOCK_SIZE) * CFrame.Angles(0, math.rad(randomRotation), 0)
+		tree:PivotTo(fallbackCFrame)
+		warn(string.format("[TreeSpawner] DEBUG: Tree '%s' still has no PrimaryPart after attempting to set one! Using extents fallback.", tree.Name))
 	end
 	
 	-- Parent to the world
