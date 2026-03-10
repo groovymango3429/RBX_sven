@@ -40,7 +40,8 @@
       "World": { "$className": "Folder",
         "ActiveChunks": { "$className": "Folder" },
         "StaticGeometry": { "$className": "Folder" },
-        "WaterPlanes": { "$className": "Folder" }
+        "WaterPlanes": { "$className": "Folder" },
+        "Trees": { "$className": "Folder" }
       },
       "Entities": { "$className": "Folder",
         "Zombies": { "$className": "Folder" },

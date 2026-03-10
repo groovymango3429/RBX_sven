@@ -1,0 +1,31 @@
+{
+  "ClassName": "Model",
+  "Properties": {
+    "Name": "OakTree",
+    "PrimaryPart": "Trunk"
+  },
+  "Children": [
+    {
+      "ClassName": "Part",
+      "Properties": {
+        "Name": "Trunk",
+        "Anchored": true,
+        "Size": [1, 6, 1],
+        "Position": [0, 3, 0],
+        "BrickColor": "Brown",
+        "Material": "Wood"
+      }
+    },
+    {
+      "ClassName": "Part",
+      "Properties": {
+        "Name": "Leaves",
+        "Anchored": true,
+        "Size": [5, 4, 5],
+        "Position": [0, 7, 0],
+        "BrickColor": "Dark green",
+        "Material": "Grass"
+      }
+    }
+  ]
+}

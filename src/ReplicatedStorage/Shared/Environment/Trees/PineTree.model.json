@@ -1,0 +1,42 @@
+{
+  "ClassName": "Model",
+  "Properties": {
+    "Name": "PineTree",
+    "PrimaryPart": "Trunk"
+  },
+  "Children": [
+    {
+      "ClassName": "Part",
+      "Properties": {
+        "Name": "Trunk",
+        "Anchored": true,
+        "Size": [0.8, 8, 0.8],
+        "Position": [0, 4, 0],
+        "BrickColor": "Brown",
+        "Material": "Wood"
+      }
+    },
+    {
+      "ClassName": "Part",
+      "Properties": {
+        "Name": "Leaves1",
+        "Anchored": true,
+        "Size": [4, 3, 4],
+        "Position": [0, 8, 0],
+        "BrickColor": "Earth green",
+        "Material": "Grass"
+      }
+    },
+    {
+      "ClassName": "Part",
+      "Properties": {
+        "Name": "Leaves2",
+        "Anchored": true,
+        "Size": [3, 2, 3],
+        "Position": [0, 10, 0],
+        "BrickColor": "Earth green",
+        "Material": "Grass"
+      }
+    }
+  ]
+}

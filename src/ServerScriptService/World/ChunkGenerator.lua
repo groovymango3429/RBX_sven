@@ -91,8 +91,25 @@ local ChunkGenerator = {}
 
 --- _getHeight: Sample the noise heightmap at world position (wx, wz).
 -- Returns a continuous surface height clamped to [HEIGHT_MIN, HEIGHT_MAX].
+-- Applies river carving and lake lowering where appropriate.
 local function _getHeight(wx, wz)
-	return math.clamp(NoiseConfig.GetHeight(wx, wz), HEIGHT_MIN, HEIGHT_MAX)
+	local baseHeight = math.clamp(NoiseConfig.GetHeight(wx, wz), HEIGHT_MIN, HEIGHT_MAX)
+	local cont = NoiseConfig.GetContinentalness(wx, wz)
+	
+	-- Apply river carving
+	local riverInfluence = NoiseConfig.GetRiverInfluence(wx, wz)
+	if riverInfluence > 0 then
+		-- Rivers carve deeper into terrain, creating downhill flow paths
+		baseHeight = baseHeight - (riverInfluence * T.RIVER_DEPTH)
+	end
+	
+	-- Apply lake lowering in appropriate areas
+	if NoiseConfig.IsLakePosition(wx, wz, cont) and baseHeight > WATER_LEVEL then
+		-- Lower terrain in lake basins
+		baseHeight = baseHeight - T.LAKE_DEPTH_OFFSET
+	end
+	
+	return math.clamp(baseHeight, HEIGHT_MIN, HEIGHT_MAX)
 end
 
 local function _getGrassBlend(h, continentalness)
