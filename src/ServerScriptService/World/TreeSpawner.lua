@@ -215,6 +215,7 @@ local function spawnTree(wx, wy, wz, parentFolder)
 				part.Size = part.Size * randomScale
 				
 				-- Scale only the position offset, preserve rotation
+				-- (offset - offset.Position) extracts the rotational component by removing the position
 				local scaledOffset = CFrame.new(offset.Position * randomScale) * (offset - offset.Position)
 				part.CFrame = primaryCFrame:ToWorldSpace(scaledOffset)
 			end
