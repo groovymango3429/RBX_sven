@@ -13,19 +13,12 @@
     Y = H+1 … WATER_LVL → Water (only when H < WATER_LEVEL)
     Y > max(H, WATER_LVL) → Air
 
-  Height shaping (two-stage)
-  --------------------------
-  1. A low-frequency *continental* noise (CONT_SCALE) defines broad elevation
-     zones — ocean basin, plains, rolling hills, mountain ranges.  The value
-     is linearly mapped (no smoothstep) so transitions stay gradual and
-     zone boundaries don't produce harsh blob-like plateaus.
-  2. Six fBm detail octaves (lacunarity=2.0, persistence=0.5) add local
-     variation whose magnitude is *scaled by elevation²*, ensuring plains
-     stay flat while mountains receive modest extra roughness.  The elevation²
-     coefficient is kept small (0.25) to avoid sharp mountain spikes.
-  3. A small always-on base-detail layer (BASE_SCALE/BASE_AMP/BASE_SEED) is
-     added without elevation scaling to texture flat areas and prevent the
-     horizontal banding / stripe artefact on gentle grass slopes.
+  Height shaping (oversampled)
+  ----------------------------
+  Terrain heights come from NoiseConfig.GetHeight(), which combines a
+  low-frequency continental layer with oversampled multi-octave detail.
+  This keeps plains and mountain ranges broad while smoothing out the
+  higher-frequency noise that made the previous terrain look blocky.
 
   Surface block selection by height  (thresholds from NoiseConfig.TERRAIN)
   ----------------------------------
@@ -83,13 +76,6 @@ local SNOW_HEIGHT  = T.SNOW_HEIGHT
 local ROCK_HEIGHT  = T.ROCK_HEIGHT
 local GRASS_HEIGHT = T.GRASS_HEIGHT
 
--- Amplitude sum used to normalise the fBm detail octaves to ~[-0.5, 0.5].
--- Sum all octave amplitudes once at module load time.
-local AMP_SUM = 0
-for _, oct in ipairs(T.OCTAVES) do
-	AMP_SUM = AMP_SUM + oct.amp
-end
-
 local ChunkGenerator = {}
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -98,56 +84,8 @@ local ChunkGenerator = {}
 
 --- _getHeight: Sample the noise heightmap at world position (wx, wz).
 -- Returns an integer block Y clamped to [HEIGHT_MIN, HEIGHT_MAX].
---
--- Three-stage approach:
---   1. Continental noise → elevation zone [0,1] (smoothstepped for sharp
---      transitions between ocean / plains / hills / mountains).
---   2. Six fBm octaves (lacunarity=2.0, persistence=0.5) add local variation
---      whose magnitude is scaled by elevation² so plains are flat and
---      mountains are rugged.
---   3. Always-on base detail (tiny high-frequency layer, not elevation-scaled)
---      adds micro-texture to flat areas and breaks up horizontal banding.
 local function _getHeight(wx, wz)
-	-- ── Stage 1: continental zone ────────────────────────────────────────
-	-- Low-frequency noise → remap ~[-0.5, 0.5] to [0, 1]
-	local nc        = math.noise(wx * T.CONT_SCALE, wz * T.CONT_SCALE, T.CONT_SEED)
-	local elevation = math.clamp(nc + 0.5, 0, 1)
-
-	-- Smoothstep removed: using linear elevation mapping prevents the large
-	-- flat-zone "blobs" caused by clustering values near 0 and 1.
-
-	-- ── Stage 2: fBm detail octaves ──────────────────────────────────────
-	-- Stack all octaves; each doubles frequency and halves amplitude.
-	-- The weighted sum lies in ~[-AMP_SUM*0.5, AMP_SUM*0.5]; dividing by
-	-- AMP_SUM normalises back to ~[-0.5, 0.5].
-	local detail = 0
-	for _, oct in ipairs(T.OCTAVES) do
-		detail = detail + math.noise(wx * oct.scale, wz * oct.scale, oct.seed) * oct.amp
-	end
-	detail = detail / AMP_SUM
-
-	-- ── Stage 3: always-on base detail ───────────────────────────────────
-	-- Small high-frequency layer added regardless of elevation.
-	-- Gives micro-texture to flat plains and eliminates the grass-stripe /
-	-- horizontal-banding artefact that appears on perfectly smooth slopes.
-	local baseDetail = math.noise(wx * T.BASE_SCALE, wz * T.BASE_SCALE, T.BASE_SEED) * T.BASE_AMP
-
-	-- ── Combine ──────────────────────────────────────────────────────────
-	-- elevation sets the base height zone; scaled detail adds roughness
-	-- proportional to elevation² (flat plains, rolling mountains).
-	-- Coefficient reduced (0.55 → 0.25) to smooth out mountain spikes:
-	--   plains  (elev≈0.5): detail × (0.05 + 0.25×0.25) ≈ ±5 block variation
-	--   mountains (elev≈1): detail × (0.05 +  1×0.25)   ≈ ±12 block variation
-	-- baseDetail always adds a tiny amount of surface texture everywhere.
-	local t = elevation + detail * (0.05 + elevation * elevation * 0.25) + baseDetail
-	t = math.clamp(t, 0, 1)
-
-	-- Map to [HEIGHT_MIN, HEIGHT_MAX]
-	return math.clamp(
-		math.floor(HEIGHT_MIN + t * (HEIGHT_MAX - HEIGHT_MIN) + 0.5),
-		HEIGHT_MIN,
-		HEIGHT_MAX
-	)
+	return math.clamp(NoiseConfig.GetHeight(wx, wz), HEIGHT_MIN, HEIGHT_MAX)
 end
 
 --- _getSurfaceBlock: Top block ID based on terrain height.
