@@ -63,6 +63,11 @@ NoiseConfig.TERRAIN = {
 	ROCK_HEIGHT  = terrainConfig.ROCK_HEIGHT,
 	GRASS_HEIGHT = terrainConfig.GRASS_HEIGHT,
 
+	-- Shore / surface blending thresholds (used by ChunkGenerator)
+	SHORE_HEIGHT_BAND = terrainConfig.SHORE_HEIGHT_BAND,
+	SURFACE_BLEND_BAND = terrainConfig.SURFACE_BLEND_BAND,
+	BEACH_CONTINENTALNESS = terrainConfig.BEACH_CONTINENTALNESS,
+
 	-- Underground depth
 	UNDERGROUND_DEPTH = terrainConfig.UNDERGROUND_DEPTH,
 
