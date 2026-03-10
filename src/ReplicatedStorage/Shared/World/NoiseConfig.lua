@@ -20,7 +20,7 @@ NoiseConfig.TERRAIN = {
 
 	-- Continental shaping — lower frequency for more spread-out biomes
 	CONT_SCALE = 0.0028,  -- broader plains and mountain ranges
-	CONT_SEED  = 42,
+	CONT_SEED  = nil, -- randomized at module load when a new session starts
 
 	-- fBm detail octaves: tuned toward broader, smoother landforms
 	OCTAVES = {
@@ -55,6 +55,16 @@ NoiseConfig.TERRAIN = {
 	-- Oversampling for smoothness
 	OVERSAMPLE_SIZE = 8,
 }
+
+-- Randomize seeds when module loads so each session gets a different world
+do
+	-- Seed the Lua RNG with current time for entropy, then pick a large int seed
+	if os and os.time then
+		math.randomseed(os.time())
+	end
+	-- Use a 30-bit random integer for the continental noise seed
+	NoiseConfig.TERRAIN.CONT_SEED = math.random(0, 2^30 - 1)
+end
 
 -- Helpers (these are what make it smooth off rip)
 local function smoothstep(x)

@@ -7,7 +7,7 @@
 local WorldConstants = {}
 
 -- World bounds in chunk coordinates (origin at 0,0)
-WorldConstants.WORLD_SIZE_CHUNKS = 512   -- 512×512 chunk grid (16 384 × 16 384 blocks)
+WorldConstants.WORLD_SIZE_CHUNKS = 1068   -- 512×512 chunk grid (16 384 × 16 384 blocks)
 
 -- Vertical limits in block units
 WorldConstants.SEA_LEVEL       = 64
