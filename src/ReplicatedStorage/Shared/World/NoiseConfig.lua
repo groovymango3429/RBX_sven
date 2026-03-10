@@ -144,8 +144,10 @@ local function applyHeightDither(x, z, height)
 	local ditherAmount = 0.4  -- Maximum dither in blocks
 	
 	-- Get a noise value that varies smoothly but rapidly
-	local ditherNoise = math.noise(x * ditherScale, z * ditherScale, ditherSeed)
-	-- Scale to [-ditherAmount, +ditherAmount]
+	-- math.noise returns values in range [-1, 1]
+	-- Add seed to x coordinate to create variation from other noise layers
+	local ditherNoise = math.noise(x * ditherScale + ditherSeed, z * ditherScale, 0)
+	-- ditherNoise is already in [-1, 1], scale to [-ditherAmount, +ditherAmount]
 	local dither = ditherNoise * ditherAmount
 	
 	return height + dither
