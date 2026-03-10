@@ -3,15 +3,15 @@
   ==============
   Procedural terrain generation using continental noise + multi-octave Perlin.
 
-  Terrain layout per column  (H = noise-derived surface height)
-  -------------------------------------------------------------
-    Y = 0               → Bedrock
-    Y = 1 … H-DEPTH     → Air  (not filled — left as 0 for performance)
-    Y = H-DEPTH+1 … H-2 → Stone
-    Y = H-1             → Sub-surface block (dirt / sand / stone)
-    Y = H               → Surface block     (grass / sand / stone / snow)
-    Y = H+1 … WATER_LVL → Water (only when H < WATER_LEVEL)
-    Y > max(H, WATER_LVL) → Air
+  Terrain layout per column  (H = continuous noise-derived surface height)
+  -----------------------------------------------------------------------
+    Y = 0                        → Bedrock
+    Y = 1 … floor(H)-DEPTH       → Air  (not filled — left as 0 for performance)
+    Y = floor(H)-DEPTH+1 … floor(H)-2 → Stone
+    Y = floor(H)-1               → Sub-surface block (dirt / sand / stone)
+    Y = floor(H)                 → Surface block     (grass / sand / stone / snow)
+    Y = floor(H)+1 … WATER_LVL   → Water (only when H < WATER_LEVEL)
+    Y > max(floor(H), WATER_LVL) → Air
 
   Height shaping (oversampled)
   ----------------------------

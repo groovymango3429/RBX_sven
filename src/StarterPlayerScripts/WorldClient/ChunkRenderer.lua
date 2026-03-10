@@ -32,6 +32,7 @@ local Workspace         = game:GetService("Workspace")
 local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder = Shared:WaitForChild("World")
 
+local BlockRegistry   = require(WorldFolder:WaitForChild("BlockRegistry"))
 local ChunkSerializer = require(WorldFolder:WaitForChild("ChunkSerializer"))
 local ChunkConstants  = require(WorldFolder:WaitForChild("ChunkConstants"))
 local NoiseConfig     = require(WorldFolder:WaitForChild("NoiseConfig"))
@@ -39,7 +40,10 @@ local NoiseConfig     = require(WorldFolder:WaitForChild("NoiseConfig"))
 local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 9
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT  -- 128
 local BLOCK_SIZE   = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
-local ID_WATER     = 11
+local ID_WATER     = BlockRegistry.getId("water")
+-- Prevent an exactly integral terrain height from producing 0 occupancy,
+-- which would hide the surface voxel entirely when written to Roblox Terrain.
+local SURFACE_OCCUPANCY_EPSILON = 1e-4
 
 local _renderedChunks = {}  -- chunkKey → true (rendered) | false (unloading/aborted) | nil (not loaded)
 
@@ -85,8 +89,8 @@ end
 local function _getSurfaceOccupancy(height)
   local surfaceY = math.floor(height)
   local fractional = height - surfaceY
-  if fractional <= 0 then
-    fractional = 1
+  if fractional < SURFACE_OCCUPANCY_EPSILON then
+    fractional = SURFACE_OCCUPANCY_EPSILON
   end
   return surfaceY, math.clamp(fractional, 0, 1)
 end
@@ -107,19 +111,19 @@ local function _renderChunkAsync(chunk)
   -- Each entry covers one BLOCK_SIZE³ voxel in Roblox Terrain.
   local materials = table.create(S)
   local occupancy = table.create(S)
-  local surfaceYByColumn = table.create(S)
-  local surfaceOccupancyByColumn = table.create(S)
+  local columnSurfaceY = table.create(S)
+  local columnSurfaceOccupancy = table.create(S)
 
   for xi = 1, S do
-    surfaceYByColumn[xi] = table.create(S)
-    surfaceOccupancyByColumn[xi] = table.create(S)
+    columnSurfaceY[xi] = table.create(S)
+    columnSurfaceOccupancy[xi] = table.create(S)
     local worldX = chunk.cx * CHUNK_SIZE + (xi - 1)
     for zi = 1, S do
       local worldZ = chunk.cz * CHUNK_SIZE + (zi - 1)
       local height = NoiseConfig.GetHeight(worldX, worldZ)
       local surfaceY, surfaceOccupancy = _getSurfaceOccupancy(height)
-      surfaceYByColumn[xi][zi] = surfaceY
-      surfaceOccupancyByColumn[xi][zi] = surfaceOccupancy
+      columnSurfaceY[xi][zi] = surfaceY
+      columnSurfaceOccupancy[xi][zi] = surfaceOccupancy
     end
   end
 
@@ -131,13 +135,18 @@ local function _renderChunkAsync(chunk)
       occupancy[xi][yi] = table.create(S)
       for zi = 1, S do
         -- ChunkData uses 0-based (x,y,z); convert from 1-based loop indices.
-        local id = chunk:getBlock(xi - 1, yi - 1, zi - 1)
+        local voxelY = yi - 1
+        local id = chunk:getBlock(xi - 1, voxelY, zi - 1)
         if id ~= 0 then
           materials[xi][yi][zi] = _getTerrainMaterial(id)
           occupancy[xi][yi][zi] = 1
 
-          if yi - 1 == surfaceYByColumn[xi][zi] and id ~= ID_WATER then
-            occupancy[xi][yi][zi] = surfaceOccupancyByColumn[xi][zi]
+          if voxelY == columnSurfaceY[xi][zi] then
+            -- Keep water voxels full so lakes/oceans stay flat instead of
+            -- inheriting the terrain surface taper from the ground below.
+            if id ~= ID_WATER then
+              occupancy[xi][yi][zi] = columnSurfaceOccupancy[xi][zi]
+            end
           end
         else
           materials[xi][yi][zi] = Enum.Material.Air
