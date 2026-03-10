@@ -26,6 +26,7 @@ local SEA_LEVEL = WorldConstants.SEA_LEVEL
 local MAX_SPAWN_ATTEMPTS = 48
 local RECENT_SPAWN_LIMIT = 8
 local HEIGHT_BUCKET_SIZE = 12
+local GRASS_ID = BlockRegistry.getId("grass")
 local _spawnUnlocked = {}
 local _loadingCharacter = {}
 local _recentSpawnBuckets = {}
@@ -147,8 +148,8 @@ local function selectSpawnColumn(player)
           + math.min((surfaceBlockY - SEA_LEVEL) / 32, 1) * 0.35
           - getRecentSpawnPenalty(bucketKey)
 
-        if surfaceId ~= BlockRegistry.getId("grass") then
-          score += 0.1
+        if surfaceId == GRASS_ID then
+          score += 0.05
         end
 
         local candidate = {
@@ -173,7 +174,7 @@ local function selectSpawnColumn(player)
 
   local fallbackCX, fallbackCZ, fallbackLocalX, fallbackLocalZ = getChunkCoords(mapConfig.SpawnBlockX, mapConfig.SpawnBlockZ)
   local fallbackChunk = ChunkService.requestChunk(fallbackCX, fallbackCZ, nil)
-  local surfaceBlockY = WorldConstants.SURFACE_Y_DEFAULT or 64
+  local surfaceBlockY = math.max(WorldConstants.SURFACE_Y_DEFAULT or 64, SEA_LEVEL + 2)
   if fallbackChunk then
     surfaceBlockY = findSafeSurface(fallbackChunk, fallbackLocalX, fallbackLocalZ) or surfaceBlockY
   end
