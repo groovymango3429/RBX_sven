@@ -33,9 +33,9 @@ NoiseConfig.TERRAIN = {
 	},
 
 	-- Always-on base detail (very subtle)
-	BASE_SCALE = 0.14,
+	BASE_SCALE = 0.01,
 	BASE_AMP   = 0.008,
-	BASE_SEED  = 600,
+	BASE_SEED  = 1800,
 
 	-- Terrain vertical range
 	HEIGHT_MIN = 35,
