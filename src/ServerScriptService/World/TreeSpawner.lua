@@ -61,7 +61,7 @@ local function loadTreeModels()
 	-- Find the Trees folder
 	local treesFolder = EnvironmentFolder:FindFirstChild("Trees")
 	if not treesFolder then
-		warn("[TreeSpawner] Trees folder not found at", treeConfig.TREE_MODELS_PATH)
+		warn("[TreeSpawner] Trees folder not found in Shared/Environment/")
 		return treeModels
 	end
 	
@@ -203,13 +203,20 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	-- Apply random scale variation
 	local randomScale = SCALE_MIN + (math.random() * (SCALE_MAX - SCALE_MIN))
 	if tree.PrimaryPart then
+		local primaryCFrame = tree.PrimaryPart.CFrame
+		
 		-- Scale all parts in the model
 		for _, part in ipairs(tree:GetDescendants()) do
 			if part:IsA("BasePart") then
-				local offset = tree.PrimaryPart.CFrame:ToObjectSpace(part.CFrame)
+				-- Get the offset CFrame (position + rotation) relative to PrimaryPart
+				local offset = primaryCFrame:ToObjectSpace(part.CFrame)
+				
+				-- Scale the part size
 				part.Size = part.Size * randomScale
-				-- Scale the offset position relative to PrimaryPart
-				part.CFrame = tree.PrimaryPart.CFrame:ToWorldSpace(CFrame.new(offset.Position * randomScale) * (offset - offset.Position))
+				
+				-- Scale only the position offset, preserve rotation
+				local scaledOffset = CFrame.new(offset.Position * randomScale) * (offset - offset.Position)
+				part.CFrame = primaryCFrame:ToWorldSpace(scaledOffset)
 			end
 		end
 	end
