@@ -52,7 +52,7 @@ WorldGenConfig.Terrain = {
 	SURFACE_BLEND_BAND = 4,
 	BEACH_CONTINENTALNESS = 0.34,
 	UNDERGROUND_DEPTH = 18,
-	OVERSAMPLE_SIZE = 10,
+	OVERSAMPLE_SIZE = 2,
 }
 
 return table.freeze(WorldGenConfig)
