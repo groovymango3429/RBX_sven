@@ -129,6 +129,10 @@ local function generateMapForPlayer(player)
 	end
 
 	Logger.Info("[StreamingService] Map generation complete for " .. player.Name)
+	
+	-- Print tree spawning statistics after all chunks are generated
+	TreeGenerationService.printDebugStats()
+	
 	_generating[player] = nil
 end
 

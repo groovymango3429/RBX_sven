@@ -242,7 +242,13 @@ end
 function NoiseConfig.IsLakePosition(x, z, continentalness)
 	local cfg = NoiseConfig.TERRAIN
 	-- Lakes form in low continentalness areas (inland basins/valleys)
-	return continentalness < cfg.LAKE_THRESHOLD
+	-- Use smoothstep for gradual transitions instead of hard cutoff
+	if continentalness < cfg.LAKE_THRESHOLD then
+		-- Return a blend factor (0-1) for smooth lake edges
+		-- Closer to 0 continentalness = stronger lake presence
+		return smoothstep(1 - (continentalness / cfg.LAKE_THRESHOLD))
+	end
+	return 0
 end
 
 return NoiseConfig
