@@ -52,7 +52,7 @@ WorldGenConfig.Terrain = {
 	SURFACE_BLEND_BAND = 4,
 	BEACH_CONTINENTALNESS = 0.34,
 	UNDERGROUND_DEPTH = 18,
-	OVERSAMPLE_SIZE = 4,
+	OVERSAMPLE_SIZE = 2,  -- Reduced from 4 for better performance while maintaining smoothness
 	
 	-- Mountain peak amplification (multiply high elevations to create steeper peaks)
 	MOUNTAIN_AMP_THRESHOLD = 0.72,  -- Heights above this get amplified
