@@ -75,6 +75,11 @@ NoiseConfig.TERRAIN = {
 	-- Oversampling for smoothness
 	OVERSAMPLE_SIZE = terrainConfig.OVERSAMPLE_SIZE,
 	
+	-- Height dithering to reduce voxel quantization
+	DITHER_SEED = terrainConfig.DITHER_SEED,
+	DITHER_SCALE = terrainConfig.DITHER_SCALE,
+	DITHER_AMOUNT = terrainConfig.DITHER_AMOUNT,
+	
 	-- Mountain amplification
 	MOUNTAIN_AMP_THRESHOLD = terrainConfig.MOUNTAIN_AMP_THRESHOLD,
 	MOUNTAIN_AMP_FACTOR = terrainConfig.MOUNTAIN_AMP_FACTOR,
@@ -137,18 +142,16 @@ end
 -- Add position-based micro-dither to break up voxel quantization
 -- This creates subtle height variations that smooth out stair-stepping
 local function applyHeightDither(x, z, height)
+	local cfg = NoiseConfig.TERRAIN
+	
 	-- Use high-frequency noise for sub-voxel dithering
 	-- Scale is high so dither varies rapidly across positions
-	local ditherSeed = 9999
-	local ditherScale = 0.25  -- High frequency for fine grain
-	local ditherAmount = 0.4  -- Maximum dither in blocks
-	
 	-- Get a noise value that varies smoothly but rapidly
 	-- math.noise returns values in range [-1, 1]
 	-- Add seed to x coordinate to create variation from other noise layers
-	local ditherNoise = math.noise(x * ditherScale + ditherSeed, z * ditherScale, 0)
-	-- ditherNoise is already in [-1, 1], scale to [-ditherAmount, +ditherAmount]
-	local dither = ditherNoise * ditherAmount
+	local ditherNoise = math.noise(x * cfg.DITHER_SCALE + cfg.DITHER_SEED, z * cfg.DITHER_SCALE, 0)
+	-- ditherNoise is already in [-1, 1], scale to [-DITHER_AMOUNT, +DITHER_AMOUNT]
+	local dither = ditherNoise * cfg.DITHER_AMOUNT
 	
 	return height + dither
 end
