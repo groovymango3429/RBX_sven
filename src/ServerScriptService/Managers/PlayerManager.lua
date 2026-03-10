@@ -20,44 +20,48 @@ local WorldScripts = ServerScriptService:WaitForChild("World")
 local ChunkService = require(WorldScripts:WaitForChild("ChunkService"))
 
 local BLOCK_SIZE = ChunkConstants.BLOCK_SIZE
-local MAP_CONFIG = WorldGenConfig.Map
+local mapConfig = WorldGenConfig.Map
 local _spawnUnlocked = {}
-local _readyRemoteConnected = false
+local _loadingCharacter = {}
 
 local function ensureWorldReadyRemote()
-  if _readyRemoteConnected then
-    return
-  end
-
   local Remotes = ReplicatedStorage:WaitForChild("Remotes")
   local WorldRem = Remotes:WaitForChild("World")
   local readyRemote = WorldRem:WaitForChild("MapReadyForSpawn", 10)
   assert(readyRemote, "[PlayerManager] MapReadyForSpawn RemoteEvent not found in Remotes/World")
 
   readyRemote.OnServerEvent:Connect(function(player)
-    if _spawnUnlocked[player] ~= false then
+    local unlockState = _spawnUnlocked[player]
+    if unlockState == nil then
+      warn("[PlayerManager] Ignoring MapReadyForSpawn for untracked player: " .. tostring(player and player.Name))
+      return
+    end
+    if unlockState == true then
       return
     end
 
     _spawnUnlocked[player] = true
 
-    if player.Parent and not player.Character then
+    if player.Parent and not player.Character and not _loadingCharacter[player] then
+      _loadingCharacter[player] = true
       player:LoadCharacter()
     end
   end)
-
-  _readyRemoteConnected = true
 end
+
+ensureWorldReadyRemote()
 
 
 --- onPlayerAdded: Load profile, create Replica, spawn character
 function PlayerManager.onPlayerAdded(player)
-  ensureWorldReadyRemote()
   _spawnUnlocked[player] = false
+  _loadingCharacter[player] = false
 
   print("[PlayerManager] Player added: " .. tostring(player and player.Name))
 
   player.CharacterAdded:Connect(function(character)
+    _loadingCharacter[player] = false
+
     local hrp = character:WaitForChild("HumanoidRootPart", 5)
     local humanoid = character:WaitForChild("Humanoid", 5)
     if not hrp or not humanoid then
@@ -69,8 +73,8 @@ function PlayerManager.onPlayerAdded(player)
     task.wait()
 
     -- Spawn at block origin (0, 0) — change these to set a different spawn column
-    local spawnBlockX = MAP_CONFIG.SpawnBlockX
-    local spawnBlockZ = MAP_CONFIG.SpawnBlockZ
+    local spawnBlockX = mapConfig.SpawnBlockX
+    local spawnBlockZ = mapConfig.SpawnBlockZ
     local cx = math.floor(spawnBlockX / ChunkConstants.CHUNK_SIZE)
     local cz = math.floor(spawnBlockZ / ChunkConstants.CHUNK_SIZE)
     local localX = spawnBlockX - cx * ChunkConstants.CHUNK_SIZE
@@ -116,7 +120,8 @@ function PlayerManager.onPlayerAdded(player)
 
     humanoid.Died:Connect(function()
       task.delay(GameConfig.getValue("RespawnTime"), function()
-        if player.Parent and _spawnUnlocked[player] then
+        if player.Parent and _spawnUnlocked[player] and not _loadingCharacter[player] then
+          _loadingCharacter[player] = true
           player:LoadCharacter()
         end
       end)
@@ -134,6 +139,7 @@ end
 function PlayerManager.onPlayerRemoving(player)
   -- TODO: implement profile save, Replica/Maid cleanup
   _spawnUnlocked[player] = nil
+  _loadingCharacter[player] = nil
   print("[PlayerManager] Player removing: " .. tostring(player and player.Name))
 end
 

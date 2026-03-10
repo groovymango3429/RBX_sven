@@ -10,6 +10,10 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder = Shared:WaitForChild("World")
 local WorldGenConfig = require(WorldFolder:WaitForChild("WorldGenConfig"))
 local mapConfig = WorldGenConfig.Map
+local MIN_CACHE_SIZE = 1200
+-- Extra cache headroom beyond the exact visible chunk count helps avoid LRU
+-- thrashing while players move near chunk boundaries or overlap chunk views.
+local CACHE_BUFFER = 128
 
 -- Voxel dimensions of a single chunk (width × height × depth)
 -- CHUNK_SIZE=9 → each chunk is 9×9 blocks in XZ (36×36 studs at BLOCK_SIZE=4)
@@ -38,8 +42,8 @@ ChunkConstants.LOD_TIER_2 = 8
 -- 1200 gives comfortable headroom for multiple overlapping player views with
 -- RENDER_DISTANCE=8 (289 chunks per player).
 ChunkConstants.MAX_CACHE_SIZE = math.max(
-	1200,
-	((ChunkConstants.RENDER_DISTANCE * 2 + 1) ^ 2) + 128
+	MIN_CACHE_SIZE,
+	((mapConfig.RenderDistance * 2 + 1) ^ 2) + CACHE_BUFFER
 )
 
 -- Maximum dirty (modified) chunks flushed to DataStore per interval
