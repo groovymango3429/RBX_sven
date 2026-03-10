@@ -200,17 +200,29 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	-- Clone the tree
 	local tree = treeModel:Clone()
 	
-	-- Position the tree (convert block coordinates to world position)
-	local worldPos = Vector3.new(wx * BLOCK_SIZE, wy * BLOCK_SIZE, wz * BLOCK_SIZE)
-	tree:SetPrimaryPartCFrame(CFrame.new(worldPos))
-	
-	-- Apply random Y-axis rotation
-	local randomRotation = math.random() * 360
-	tree:SetPrimaryPartCFrame(tree.PrimaryPart.CFrame * CFrame.Angles(0, math.rad(randomRotation), 0))
-	
 	-- Apply random scale variation
 	local randomScale = SCALE_MIN + (math.random() * (SCALE_MAX - SCALE_MIN))
-	tree:ScaleTo(randomScale)
+	if tree.PrimaryPart then
+		local originalCFrame = tree.PrimaryPart.CFrame
+		
+		-- Scale all parts in the model
+		for _, part in ipairs(tree:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Size = part.Size * randomScale
+				part.CFrame = originalCFrame:ToWorldSpace(originalCFrame:ToObjectSpace(part.CFrame) * randomScale)
+			end
+		end
+	end
+	
+	-- Position the tree (convert block coordinates to world position)
+	local worldPos = Vector3.new(wx * BLOCK_SIZE, wy * BLOCK_SIZE, wz * BLOCK_SIZE)
+	if tree.PrimaryPart then
+		tree:SetPrimaryPartCFrame(CFrame.new(worldPos))
+		
+		-- Apply random Y-axis rotation
+		local randomRotation = math.random() * 360
+		tree:SetPrimaryPartCFrame(tree.PrimaryPart.CFrame * CFrame.Angles(0, math.rad(randomRotation), 0))
+	end
 	
 	-- Parent to the world
 	tree.Parent = parentFolder

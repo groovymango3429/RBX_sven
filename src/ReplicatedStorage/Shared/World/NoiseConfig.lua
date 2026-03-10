@@ -25,7 +25,8 @@ local MOUNTAIN_DETAIL_BOOST = terrainConfig.MountainDetailBoost
 -- 1) a broad continental base shared by all landforms,
 -- 2) a rolling-hill lift enabled by the landform mask,
 -- 3) an additional mountain lift reserved for the mountain mask.
-local BASE_ELEVATION_FLOOR = 0.16
+-- Reduced BASE_ELEVATION_FLOOR to create more flat plains between mountains
+local BASE_ELEVATION_FLOOR = 0.12  -- Reduced from 0.16 for flatter terrain
 local CONTINENTAL_ELEVATION_WEIGHT = 0.34
 local HILL_ELEVATION_BASE = 0.08
 local HILL_ELEVATION_WEIGHT = 0.10
