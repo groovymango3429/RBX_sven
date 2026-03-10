@@ -43,16 +43,16 @@ WorldGenConfig.Terrain = {
 	BASE_SEED = 1800,
 
 	HEIGHT_MIN = 36,
-	HEIGHT_MAX = 124,
+	HEIGHT_MAX = 90,
 	WATER_LEVEL = 52,
-	SNOW_HEIGHT = 108,
-	ROCK_HEIGHT = 84,
+	SNOW_HEIGHT = 87,
+	ROCK_HEIGHT = 70,
 	GRASS_HEIGHT = 56,
 	SHORE_HEIGHT_BAND = 3,
 	SURFACE_BLEND_BAND = 4,
 	BEACH_CONTINENTALNESS = 0.34,
 	UNDERGROUND_DEPTH = 18,
-	OVERSAMPLE_SIZE = 2,
+	OVERSAMPLE_SIZE = 4,
 	
 	-- Mountain peak amplification (multiply high elevations to create steeper peaks)
 	MOUNTAIN_AMP_THRESHOLD = 0.72,  -- Heights above this get amplified
