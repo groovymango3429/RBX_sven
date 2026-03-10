@@ -85,6 +85,7 @@ end
 -- @param chunk ChunkData - The generated terrain chunk
 function TreeGenerationService.spawnTreesForChunk(chunk)
 	if not chunk then
+		warn("[TreeGenerationService] No chunk provided to spawnTreesForChunk")
 		return
 	end
 	
@@ -92,17 +93,22 @@ function TreeGenerationService.spawnTreesForChunk(chunk)
 	
 	-- Skip if trees already spawned for this chunk
 	if _treesSpawned[key] then
+		print(string.format("[TreeGenerationService] DEBUG: Skipping chunk (%d, %d) - trees already spawned", chunk.cx, chunk.cz))
 		return
 	end
 	
+	print(string.format("[TreeGenerationService] DEBUG: Spawning trees for chunk (%d, %d)", chunk.cx, chunk.cz))
+	
 	-- Get or create trees folder
 	local treesFolder = getTreesFolder()
+	print(string.format("[TreeGenerationService] DEBUG: Trees folder path: %s", treesFolder:GetFullName()))
 	
 	-- Spawn trees in this chunk
 	TreeSpawner.spawnTreesInChunk(chunk, treesFolder)
 	
 	-- Mark as complete
 	_treesSpawned[key] = true
+	print(string.format("[TreeGenerationService] DEBUG: Marked chunk (%d, %d) as complete", chunk.cx, chunk.cz))
 end
 
 --- Clear cached tree positions for a chunk (call when chunk is unloaded)
@@ -117,6 +123,11 @@ function TreeGenerationService.clearChunkTrees(cx, cz)
 	-- In a full implementation, you would need to track spawned tree instances per chunk
 	-- (e.g., by tagging them with chunk coordinates) and remove them here to prevent
 	-- memory leaks. For now, trees persist once spawned.
+end
+
+--- Print debug statistics for tree spawning
+function TreeGenerationService.printDebugStats()
+	TreeSpawner.printDebugStats()
 end
 
 return TreeGenerationService

@@ -103,10 +103,11 @@ local function _getHeight(wx, wz)
 		baseHeight = baseHeight - (riverInfluence * T.RIVER_DEPTH)
 	end
 	
-	-- Apply lake lowering in appropriate areas
-	if NoiseConfig.IsLakePosition(wx, wz, cont) and baseHeight > WATER_LEVEL then
-		-- Lower terrain in lake basins
-		baseHeight = baseHeight - T.LAKE_DEPTH_OFFSET
+	-- Apply lake lowering in appropriate areas (now with smooth transitions)
+	local lakeInfluence = NoiseConfig.IsLakePosition(wx, wz, cont)
+	if lakeInfluence > 0 and baseHeight > WATER_LEVEL then
+		-- Lower terrain in lake basins with smooth blending
+		baseHeight = baseHeight - (lakeInfluence * T.LAKE_DEPTH_OFFSET)
 	end
 	
 	return math.clamp(baseHeight, HEIGHT_MIN, HEIGHT_MAX)

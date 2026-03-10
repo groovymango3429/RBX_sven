@@ -50,6 +50,18 @@ local treeModelsFolder = nil
 -- Format: { [chunkKey] = { {x=wx, z=wz}, ... } }
 local recentTreePositions = {}
 
+-- Debug tracking for tree spawn attempts
+local debugStats = {
+	attempts = 0,
+	successfulSpawns = 0,
+	failedDensity = 0,
+	failedChance = 0,
+	failedSpacing = 0,
+	failedNoSurface = 0,
+	failedNotGrass = 0,
+	failedSlope = 0,
+}
+
 --- Load tree models from the Trees folder
 local function loadTreeModels()
 	if treeModels then
@@ -62,6 +74,17 @@ local function loadTreeModels()
 	local treesFolder = EnvironmentFolder:FindFirstChild("Trees")
 	if not treesFolder then
 		warn("[TreeSpawner] Trees folder not found in Shared/Environment/")
+		print("[TreeSpawner] DEBUG: EnvironmentFolder path:", EnvironmentFolder:GetFullName())
+		print("[TreeSpawner] DEBUG: EnvironmentFolder children:", table.concat(
+			(function()
+				local names = {}
+				for _, child in ipairs(EnvironmentFolder:GetChildren()) do
+					table.insert(names, child.Name)
+				end
+				return names
+			end)(),
+			", "
+		))
 		return treeModels
 	end
 	
@@ -76,6 +99,8 @@ local function loadTreeModels()
 	
 	if #treeModels == 0 then
 		warn("[TreeSpawner] No tree models found in Trees folder. Add tree models to spawn trees.")
+	else
+		print(string.format("[TreeSpawner] DEBUG: Loaded %d tree models from %s", #treeModels, treesFolder:GetFullName()))
 	end
 	
 	return treeModels
@@ -190,6 +215,7 @@ end
 local function spawnTree(wx, wy, wz, parentFolder)
 	local models = loadTreeModels()
 	if #models == 0 then
+		print("[TreeSpawner] DEBUG: No tree models available")
 		return false
 	end
 	
@@ -199,6 +225,20 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	
 	-- Clone the tree
 	local tree = treeModel:Clone()
+	
+	-- Check if PrimaryPart exists
+	if not tree.PrimaryPart then
+		warn(string.format("[TreeSpawner] DEBUG: Tree model '%s' has no PrimaryPart! Setting position directly.", treeModel.Name))
+		-- Attempt to find a suitable part to use as anchor
+		local parts = tree:GetDescendants()
+		for _, part in ipairs(parts) do
+			if part:IsA("BasePart") then
+				tree.PrimaryPart = part
+				print(string.format("[TreeSpawner] DEBUG: Set PrimaryPart to '%s' for tree '%s'", part.Name, tree.Name))
+				break
+			end
+		end
+	end
 	
 	-- Apply random scale variation
 	local randomScale = SCALE_MIN + (math.random() * (SCALE_MAX - SCALE_MIN))
@@ -229,10 +269,15 @@ local function spawnTree(wx, wy, wz, parentFolder)
 		local randomRotation = math.random() * 360
 		local rotatedCFrame = CFrame.new(worldPos) * CFrame.Angles(0, math.rad(randomRotation), 0)
 		tree:PivotTo(rotatedCFrame)
+		print(string.format("[TreeSpawner] DEBUG: Spawned tree at world position (%.1f, %.1f, %.1f) | Block: (%d, %d, %d)",
+			worldPos.X, worldPos.Y, worldPos.Z, wx, wy, wz))
+	else
+		warn(string.format("[TreeSpawner] DEBUG: Tree '%s' still has no PrimaryPart after attempting to set one!", tree.Name))
 	end
 	
 	-- Parent to the world
 	tree.Parent = parentFolder
+	print(string.format("[TreeSpawner] DEBUG: Tree parented to %s", parentFolder:GetFullName()))
 	
 	return true
 end
@@ -251,6 +296,21 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 	local originX = cx * CHUNK_SIZE
 	local originZ = cz * CHUNK_SIZE
 	
+	print(string.format("[TreeSpawner] DEBUG: Starting tree spawn for chunk (%d, %d) | Origin: (%d, %d)", 
+		cx, cz, originX, originZ))
+	
+	-- Reset debug stats for this chunk
+	local chunkStats = {
+		attempts = 0,
+		successfulSpawns = 0,
+		failedDensity = 0,
+		failedChance = 0,
+		failedSpacing = 0,
+		failedNoSurface = 0,
+		failedNotGrass = 0,
+		failedSlope = 0,
+	}
+	
 	-- Sample tree spawning with some spacing for performance (not every block)
 	local sampleStride = 2  -- Check every 2 blocks
 	
@@ -258,23 +318,34 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 		local wx = originX + x
 		for z = 0, CHUNK_SIZE - 1, sampleStride do
 			local wz = originZ + z
+			chunkStats.attempts = chunkStats.attempts + 1
 			
 			-- Sequential checks using a skip flag (avoid goto)
 			local shouldSpawn = true
+			local failReason = ""
+			
 			local density = getTreeDensity(wx, wz)
 			if density < TREE_CLUSTER_THRESHOLD then
 				shouldSpawn = false
+				failReason = "density"
+				chunkStats.failedDensity = chunkStats.failedDensity + 1
 			end
 			
 			-- Random chance based on density (not every valid spot gets a tree)
-			local spawnChance = (density - TREE_CLUSTER_THRESHOLD) / (1 - TREE_CLUSTER_THRESHOLD)
-			if spawnChance <= 0 or math.random() > spawnChance * 0.3 then  -- 30% max spawn rate in dense areas
-				shouldSpawn = false
+			if shouldSpawn then
+				local spawnChance = (density - TREE_CLUSTER_THRESHOLD) / (1 - TREE_CLUSTER_THRESHOLD)
+				if spawnChance <= 0 or math.random() > spawnChance * 0.3 then  -- 30% max spawn rate in dense areas
+					shouldSpawn = false
+					failReason = "random_chance"
+					chunkStats.failedChance = chunkStats.failedChance + 1
+				end
 			end
 			
 			-- Check spacing
 			if shouldSpawn and isTooCloseToExistingTree(wx, wz, cx, cz) then
 				shouldSpawn = false
+				failReason = "spacing"
+				chunkStats.failedSpacing = chunkStats.failedSpacing + 1
 			end
 			
 			-- Find surface Y
@@ -283,12 +354,16 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 				surfaceY = findSurfaceY(chunk, x, z)
 				if not surfaceY then
 					shouldSpawn = false
+					failReason = "no_surface"
+					chunkStats.failedNoSurface = chunkStats.failedNoSurface + 1
 				end
 			end
 			
 			-- Check if surface is grass
 			if shouldSpawn and not isGrassSurface(chunk, x, surfaceY, z) then
 				shouldSpawn = false
+				failReason = "not_grass"
+				chunkStats.failedNotGrass = chunkStats.failedNotGrass + 1
 			end
 			
 			-- Check slope
@@ -296,6 +371,8 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 				local slope = calculateSlope(chunk, x, z, wx, wz)
 				if slope > MAX_SLOPE_FOR_TREES then
 					shouldSpawn = false
+					failReason = "slope"
+					chunkStats.failedSlope = chunkStats.failedSlope + 1
 				end
 			end
 			
@@ -303,16 +380,67 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 			if shouldSpawn then
 				if spawnTree(wx, surfaceY + 1, wz, parentFolder) then
 					recordTreePosition(wx, wz, cx, cz)
+					chunkStats.successfulSpawns = chunkStats.successfulSpawns + 1
 				end
 			end
 		end
 	end
+	
+	-- Update global stats
+	debugStats.attempts = debugStats.attempts + chunkStats.attempts
+	debugStats.successfulSpawns = debugStats.successfulSpawns + chunkStats.successfulSpawns
+	debugStats.failedDensity = debugStats.failedDensity + chunkStats.failedDensity
+	debugStats.failedChance = debugStats.failedChance + chunkStats.failedChance
+	debugStats.failedSpacing = debugStats.failedSpacing + chunkStats.failedSpacing
+	debugStats.failedNoSurface = debugStats.failedNoSurface + chunkStats.failedNoSurface
+	debugStats.failedNotGrass = debugStats.failedNotGrass + chunkStats.failedNotGrass
+	debugStats.failedSlope = debugStats.failedSlope + chunkStats.failedSlope
+	
+	print(string.format(
+		"[TreeSpawner] DEBUG: Chunk (%d, %d) complete - Spawned: %d | Attempts: %d | Failed: density=%d, chance=%d, spacing=%d, no_surface=%d, not_grass=%d, slope=%d",
+		cx, cz, chunkStats.successfulSpawns, chunkStats.attempts,
+		chunkStats.failedDensity, chunkStats.failedChance, chunkStats.failedSpacing,
+		chunkStats.failedNoSurface, chunkStats.failedNotGrass, chunkStats.failedSlope
+	))
 end
 
 --- Clear cached tree positions for a chunk (call when chunk is unloaded)
 function TreeSpawner.clearChunkCache(cx, cz)
 	local chunkKey = cx .. "," .. cz
 	recentTreePositions[chunkKey] = nil
+end
+
+--- Get debug statistics for tree spawning
+function TreeSpawner.getDebugStats()
+	return debugStats
+end
+
+--- Print debug statistics summary
+function TreeSpawner.printDebugStats()
+	print("[TreeSpawner] ========== TREE SPAWNING STATISTICS ==========")
+	print(string.format("[TreeSpawner] Total attempts: %d", debugStats.attempts))
+	print(string.format("[TreeSpawner] Successful spawns: %d (%.1f%%)", 
+		debugStats.successfulSpawns, 
+		debugStats.attempts > 0 and (debugStats.successfulSpawns / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - Density: %d (%.1f%%)", 
+		debugStats.failedDensity,
+		debugStats.attempts > 0 and (debugStats.failedDensity / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - Random Chance: %d (%.1f%%)", 
+		debugStats.failedChance,
+		debugStats.attempts > 0 and (debugStats.failedChance / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - Spacing: %d (%.1f%%)", 
+		debugStats.failedSpacing,
+		debugStats.attempts > 0 and (debugStats.failedSpacing / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - No Surface: %d (%.1f%%)", 
+		debugStats.failedNoSurface,
+		debugStats.attempts > 0 and (debugStats.failedNoSurface / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - Not Grass: %d (%.1f%%)", 
+		debugStats.failedNotGrass,
+		debugStats.attempts > 0 and (debugStats.failedNotGrass / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - Slope: %d (%.1f%%)", 
+		debugStats.failedSlope,
+		debugStats.attempts > 0 and (debugStats.failedSlope / debugStats.attempts * 100) or 0))
+	print("[TreeSpawner] ============================================")
 end
 
 return TreeSpawner
