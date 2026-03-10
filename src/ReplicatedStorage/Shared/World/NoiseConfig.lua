@@ -13,47 +13,45 @@
   Result: Beautiful rolling hills and gentle mountains directly from the math. Voxel edges are minimized by design.
 ]]
 local NoiseConfig = {}
-local MIN_DETAIL_SCALE = 0.04          -- baseline detail strength in flatter terrain
-local ELEVATION_DETAIL_FACTOR = 0.18   -- extra detail strength added by elevation²
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local WorldFolder = Shared:WaitForChild("World")
+local WorldGenConfig = require(WorldFolder:WaitForChild("WorldGenConfig"))
+local terrainConfig = WorldGenConfig.Terrain
+local MIN_DETAIL_SCALE = terrainConfig.MinDetailScale
+local ELEVATION_DETAIL_FACTOR = terrainConfig.ElevationDetailFactor
 
 NoiseConfig.TERRAIN = {
 
 	-- Continental shaping — lower frequency for more spread-out biomes
-	CONT_SCALE = 0.0028,  -- broader plains and mountain ranges
-	CONT_SEED  = nil, -- randomized at module load when a new session starts
+	CONT_SCALE = terrainConfig.CONT_SCALE,  -- broader plains and mountain ranges
+	CONT_SEED  = terrainConfig.CONT_SEED, -- randomized at module load when a new session starts
 
 	-- fBm detail octaves: tuned toward broader, smoother landforms
-	OCTAVES = {
-		{ scale = 0.008,  amp = 1.0,   seed = 0 },   -- broad rolling hills
-		{ scale = 0.016,  amp = 0.45,  seed = 100 }, -- wide secondary ridges
-		{ scale = 0.032,  amp = 0.20,  seed = 200 }, -- long terrain rolls
-		{ scale = 0.064,  amp = 0.09,  seed = 300 }, -- gentle local variation
-		{ scale = 0.128,  amp = 0.035, seed = 400 }, -- restrained micro-shaping
-		{ scale = 0.240,  amp = 0.012, seed = 500 }, -- tiny surface breakup
-	},
+	OCTAVES = terrainConfig.OCTAVES,
 
 	-- Always-on base detail (very subtle)
-	BASE_SCALE = 0.01,
-	BASE_AMP   = 0.008,
-	BASE_SEED  = 1800,
+	BASE_SCALE = terrainConfig.BASE_SCALE,
+	BASE_AMP   = terrainConfig.BASE_AMP,
+	BASE_SEED  = terrainConfig.BASE_SEED,
 
 	-- Terrain vertical range
-	HEIGHT_MIN = 35,
-	HEIGHT_MAX = 120,
+	HEIGHT_MIN = terrainConfig.HEIGHT_MIN,
+	HEIGHT_MAX = terrainConfig.HEIGHT_MAX,
 
 	-- Water level
-	WATER_LEVEL = 50,
+	WATER_LEVEL = terrainConfig.WATER_LEVEL,
 
 	-- Biome thresholds
-	SNOW_HEIGHT  = 92,
-	ROCK_HEIGHT  = 72,
-	GRASS_HEIGHT = 53,
+	SNOW_HEIGHT  = terrainConfig.SNOW_HEIGHT,
+	ROCK_HEIGHT  = terrainConfig.ROCK_HEIGHT,
+	GRASS_HEIGHT = terrainConfig.GRASS_HEIGHT,
 
 	-- Underground depth
-	UNDERGROUND_DEPTH = 12,
+	UNDERGROUND_DEPTH = terrainConfig.UNDERGROUND_DEPTH,
 
 	-- Oversampling for smoothness
-	OVERSAMPLE_SIZE = 8,
+	OVERSAMPLE_SIZE = terrainConfig.OVERSAMPLE_SIZE,
 }
 
 -- Randomize seeds when module loads so each session gets a different world

@@ -21,6 +21,7 @@ end
 
 local function boot()
   print("[GameManager] === DeadLand Boot Sequence ===")
+  Players.CharacterAutoLoads = false
 
   local Logger          = load(Shared.Core, "Logger")
   local ServiceLocator  = load(Shared.Core, "ServiceLocator")
