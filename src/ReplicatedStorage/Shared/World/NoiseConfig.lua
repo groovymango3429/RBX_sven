@@ -13,6 +13,8 @@
   Result: Beautiful rolling hills and gentle mountains directly from the math. Voxel edges are minimized by design.
 ]]
 local NoiseConfig = {}
+local MIN_DETAIL_SCALE = 0.04          -- baseline detail strength in flatter terrain
+local ELEVATION_DETAIL_FACTOR = 0.18   -- extra detail strength added by elevation²
 
 NoiseConfig.TERRAIN = {
 
@@ -64,15 +66,20 @@ local function sampleNoise(x, z, scale, seed)
 	local sum = 0
 	local step = cfg.OVERSAMPLE_SIZE
 	local count = step * step
-	local half = (step - 1) * 0.5
+	local oversampleSpacing = 1.5  -- world-space spacing between oversample taps
+	local gridCenterOffset = (step - 1) / 2
 	for dx = 0, step - 1 do
 		for dz = 0, step - 1 do
-			local sx = x + (dx - half) * 1.5
-			local sz = z + (dz - half) * 1.5
+			local sx = x + (dx - gridCenterOffset) * oversampleSpacing
+			local sz = z + (dz - gridCenterOffset) * oversampleSpacing
 			sum = sum + math.noise(sx * scale, sz * scale, seed)
 		end
 	end
 	return sum / count
+end
+
+local function clampHeight(cfg, height)
+	return math.clamp(math.floor(height + 0.5), cfg.HEIGHT_MIN, cfg.HEIGHT_MAX)
 end
 
 function NoiseConfig.GetContinentalness(x, z)
@@ -93,18 +100,22 @@ function NoiseConfig.GetHeight(x, z)
 		ampSum = ampSum + octave.amp
 	end
 
-	if ampSum > 0 then
-		detail = detail / ampSum
+	local heightRange = cfg.HEIGHT_MAX - cfg.HEIGHT_MIN
+	if ampSum == 0 then
+		return clampHeight(cfg, cfg.HEIGHT_MIN + (heightRange * cont))
 	end
 
-	detail = detail * (0.04 + cont * cont * 0.18)
+	-- Safe after the early return above; detail is now normalized to a predictable range.
+	detail = detail / ampSum
+
+	-- Flat areas keep a little shape, while higher continental terrain gets more variation.
+	detail = detail * (MIN_DETAIL_SCALE + cont * cont * ELEVATION_DETAIL_FACTOR)
 	detail = detail + sampleNoise(x, z, cfg.BASE_SCALE, cfg.BASE_SEED) * cfg.BASE_AMP
 
 	-- Final height (detail is normalized so the shaping stays smooth and predictable)
-	local heightRange = cfg.HEIGHT_MAX - cfg.HEIGHT_MIN
 	local finalHeight = cfg.HEIGHT_MIN + (heightRange * cont) + (detail * heightRange)
 
-	return math.clamp(math.floor(finalHeight + 0.5), cfg.HEIGHT_MIN, cfg.HEIGHT_MAX)
+	return clampHeight(cfg, finalHeight)
 end
 
 return NoiseConfig
