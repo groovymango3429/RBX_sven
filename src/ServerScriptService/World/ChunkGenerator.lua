@@ -20,12 +20,11 @@
   This keeps plains and mountain ranges broad while smoothing out the
   higher-frequency noise that made the previous terrain look blocky.
 
-  Surface block selection by height  (thresholds from NoiseConfig.TERRAIN)
-  ----------------------------------
-    H ≥ SNOW_HEIGHT  → Snow   (high mountain)
-    H ≥ ROCK_HEIGHT  → Stone  (rocky hillside)
-    H ≥ GRASS_HEIGHT → Grass  (plains / hills)
-    H < GRASS_HEIGHT → Sand   (beach / lake floor)
+  Surface block selection
+  -----------------------
+    High elevations still become snow / rock, but low-elevation shoreline
+    blending now also considers continentalness so inland valleys stay grassy
+    more often while beaches remain near coasts and low water-adjacent areas.
 
   Water fill
   ----------
@@ -75,6 +74,14 @@ local WATER_LEVEL = T.WATER_LEVEL
 local SNOW_HEIGHT  = T.SNOW_HEIGHT
 local ROCK_HEIGHT  = T.ROCK_HEIGHT
 local GRASS_HEIGHT = T.GRASS_HEIGHT
+local SHORE_HEIGHT_BAND = T.SHORE_HEIGHT_BAND
+local SURFACE_BLEND_BAND = T.SURFACE_BLEND_BAND
+local BEACH_CONTINENTALNESS = T.BEACH_CONTINENTALNESS
+-- Continentalness carries most of the inland/coastal signal, while the shore
+-- blend adds a smaller local push so beaches stay near water instead of
+-- appearing as isolated circular patches deeper inland.
+local CONTINENTALNESS_GRASS_WEIGHT = 0.85
+local SHORE_BLEND_GRASS_WEIGHT = 0.35
 
 local ChunkGenerator = {}
 
@@ -88,18 +95,46 @@ local function _getHeight(wx, wz)
 	return math.clamp(NoiseConfig.GetHeight(wx, wz), HEIGHT_MIN, HEIGHT_MAX)
 end
 
---- _getSurfaceBlock: Top block ID based on terrain height.
-local function _getSurfaceBlock(h)
+local function _getGrassBlend(h, continentalness)
+	local heightBlend = math.clamp(
+		(h - (GRASS_HEIGHT - SURFACE_BLEND_BAND)) / math.max(SURFACE_BLEND_BAND, 1),
+		0,
+		1
+	)
+	local shoreBlend = math.clamp(
+		(h - WATER_LEVEL) / math.max(SHORE_HEIGHT_BAND, 1),
+		0,
+		1
+	)
+
+	return math.max(
+		heightBlend,
+		continentalness * CONTINENTALNESS_GRASS_WEIGHT + shoreBlend * SHORE_BLEND_GRASS_WEIGHT
+	)
+end
+
+--- _getSurfaceBlock: Top block ID based on terrain height + continentalness.
+local function _getSurfaceBlock(h, continentalness)
 	if h >= SNOW_HEIGHT  then return ID_SNOW  end  -- mountain peak
 	if h >= ROCK_HEIGHT  then return ID_STONE end  -- rocky hillside
-	if h >= GRASS_HEIGHT then return ID_GRASS end  -- plains
-	return ID_SAND                                 -- lowland / beach
+
+	-- Keep sandy beaches concentrated to genuinely coastal / water-adjacent
+	-- lowlands while allowing sheltered inland valleys to stay grassy.
+	if h <= WATER_LEVEL + SHORE_HEIGHT_BAND and continentalness < BEACH_CONTINENTALNESS then
+		return ID_SAND
+	end
+	if _getGrassBlend(h, continentalness) >= 0.5 then
+		return ID_GRASS
+	end
+	return ID_SAND
 end
 
 --- _getSubSurfaceBlock: Block directly beneath the surface.
-local function _getSubSurfaceBlock(h)
+local function _getSubSurfaceBlock(h, continentalness)
 	if h >= ROCK_HEIGHT  then return ID_STONE end  -- rocky
-	if h >= GRASS_HEIGHT then return ID_DIRT  end  -- grassy biome
+	if _getSurfaceBlock(h, continentalness) == ID_GRASS then
+		return ID_DIRT
+	end
 	return ID_SAND                                 -- sandy biome
 end
 
@@ -136,6 +171,7 @@ function ChunkGenerator.generateNoise(cx, cz)
 
 			-- Surface height for this column
 			local surfH    = _getHeight(wx, originZ + z)
+			local cont     = NoiseConfig.GetContinentalness(wx, originZ + z)
 			local surfY    = math.floor(surfH)
 			-- Base flat index for (x, y=0, z) — adding y*S gives (x, y, z)
 			local base     = xStride + z + 1
@@ -155,21 +191,21 @@ function ChunkGenerator.generateNoise(cx, cz)
 			-- ── Sub-surface block (dirt / sand) ───────────────────────────
 			local subY = surfY - 1
 			if subY >= 1 and subY < H then
-				blocks[base + subY * S] = _getSubSurfaceBlock(surfH)
+				blocks[base + subY * S] = _getSubSurfaceBlock(surfH, cont)
 			end
 
 			-- ── Top surface block (grass / sand / stone / snow) ───────────
 			if surfY >= 0 and surfY < H then
-				blocks[base + surfY * S] = _getSurfaceBlock(surfH)
+				blocks[base + surfY * S] = _getSurfaceBlock(surfH, cont)
 			end
 
 			-- ── Water fill (columns below sea level) ──────────────────────
-			-- surfH < GRASS_HEIGHT already ensures sand surface/sub-surface,
-			-- so we only need to place the water blocks above the floor.
-			-- WATER_LEVEL (50) is always well below CHUNK_HEIGHT (128),
-			-- so no upper-bound clamp against H is required here.
+			-- Fill from the terrain surface upward, clamped to the chunk height
+			-- so submerged columns always receive water instead of exposing rock.
 			if surfH < WATER_LEVEL then
-				for y = surfY + 1, WATER_LEVEL do
+				local waterStart = math.max(surfY + 1, 1)
+				local waterEnd = math.min(WATER_LEVEL, H - 1)
+				for y = waterStart, waterEnd do
 					blocks[base + y * S] = ID_WATER
 				end
 			end

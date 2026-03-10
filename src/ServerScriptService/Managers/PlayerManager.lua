@@ -11,6 +11,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder = Shared:WaitForChild("World")
 local CoreFolder = Shared:WaitForChild("Core")
+local BlockRegistry = require(WorldFolder:WaitForChild("BlockRegistry"))
 local WorldConstants = require(WorldFolder:WaitForChild("WorldConstants"))
 local WorldGenConfig = require(WorldFolder:WaitForChild("WorldGenConfig"))
 local ChunkConstants = require(WorldFolder:WaitForChild("ChunkConstants"))
@@ -21,8 +22,22 @@ local ChunkService = require(WorldScripts:WaitForChild("ChunkService"))
 
 local BLOCK_SIZE = ChunkConstants.BLOCK_SIZE
 local mapConfig = WorldGenConfig.Map
+local SEA_LEVEL = WorldConstants.SEA_LEVEL
+local MAX_SPAWN_ATTEMPTS = 48
+local RECENT_SPAWN_LIMIT = 8
+local HEIGHT_BUCKET_SIZE = 12
+local GRASS_ID = BlockRegistry.getId("grass")
+local SEED_USER_MULTIPLIER = 131
+local SEED_ROLL_MULTIPLIER = 7919
+local RECENT_BUCKET_PENALTY_WEIGHT = 0.35
+local ELEVATION_SCORE_SCALE = 32
+local ELEVATION_SCORE_WEIGHT = 0.35
+local GRASS_SPAWN_PREFERENCE_BONUS = 0.05
+local FALLBACK_SURFACE_Y = 64
 local _spawnUnlocked = {}
 local _loadingCharacter = {}
+local _recentSpawnBuckets = {}
+local _spawnRollCounter = 0
 
 local function ensureWorldReadyRemote()
   local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -51,6 +66,130 @@ end
 
 ensureWorldReadyRemote()
 
+local function getChunkCoords(blockX, blockZ)
+  local chunkSize = ChunkConstants.CHUNK_SIZE
+  local cx = math.floor(blockX / chunkSize)
+  local cz = math.floor(blockZ / chunkSize)
+  local localX = blockX - cx * chunkSize
+  local localZ = blockZ - cz * chunkSize
+  return cx, cz, localX, localZ
+end
+
+local function findSafeSurface(chunk, localX, localZ)
+  for y = ChunkConstants.CHUNK_HEIGHT - 3, 1, -1 do
+    local surfaceId = chunk:getBlock(localX, y, localZ)
+    local surfaceDef = BlockRegistry.getById(surfaceId)
+    if surfaceDef
+      and surfaceId ~= 0
+      and surfaceDef.solid
+      and not surfaceDef.transparent
+      and not surfaceDef.liquid
+      and y > SEA_LEVEL
+    then
+      local headId = chunk:getBlock(localX, y + 1, localZ)
+      local upperHeadId = chunk:getBlock(localX, y + 2, localZ)
+      if headId == 0 and upperHeadId == 0 then
+        return y, surfaceId
+      end
+    end
+  end
+end
+
+local function pushRecentSpawnBucket(bucketKey)
+  if not bucketKey then
+    return
+  end
+
+  table.insert(_recentSpawnBuckets, bucketKey)
+  while #_recentSpawnBuckets > RECENT_SPAWN_LIMIT do
+    table.remove(_recentSpawnBuckets, 1)
+  end
+end
+
+local function getRecentSpawnPenalty(bucketKey)
+  for i = #_recentSpawnBuckets, 1, -1 do
+    if _recentSpawnBuckets[i] == bucketKey then
+      return (#_recentSpawnBuckets - i + 1) * RECENT_BUCKET_PENALTY_WEIGHT
+    end
+  end
+
+  return 0
+end
+
+local function buildSpawnCandidate(rng, attempt)
+  local maxRadius = math.max(mapConfig.SpawnSafeRadius, ChunkConstants.CHUNK_SIZE)
+  local minRadius = math.min(math.max(ChunkConstants.CHUNK_SIZE, math.floor(maxRadius * 0.18)), maxRadius)
+  local angle = rng:NextNumber(0, math.pi * 2)
+  local radialBlend = math.max(rng:NextNumber(), attempt / MAX_SPAWN_ATTEMPTS)
+  local radius = minRadius + (maxRadius - minRadius) * radialBlend
+  local blockX = mapConfig.SpawnBlockX + math.round(math.cos(angle) * radius)
+  local blockZ = mapConfig.SpawnBlockZ + math.round(math.sin(angle) * radius)
+  return blockX, blockZ, radius, maxRadius
+end
+
+local function selectSpawnColumn(player)
+  _spawnRollCounter = _spawnRollCounter + 1
+  -- Mix a stable per-player factor with a changing roll counter so respawns do
+  -- not keep sampling the same terrain columns.
+  local timestampMillis = DateTime.now().UnixTimestampMillis
+  local seed = player.UserId * SEED_USER_MULTIPLIER + timestampMillis + _spawnRollCounter * SEED_ROLL_MULTIPLIER
+  local rng = Random.new(seed)
+  local bestCandidate = nil
+
+  for attempt = 1, MAX_SPAWN_ATTEMPTS do
+    local blockX, blockZ, radius, maxRadius = buildSpawnCandidate(rng, attempt)
+    local cx, cz, localX, localZ = getChunkCoords(blockX, blockZ)
+    local chunk = ChunkService.requestChunk(cx, cz, nil)
+
+    if chunk then
+      local surfaceBlockY, surfaceId = findSafeSurface(chunk, localX, localZ)
+      if surfaceBlockY then
+        local heightBucket = math.floor(surfaceBlockY / HEIGHT_BUCKET_SIZE)
+        local bucketKey = tostring(surfaceId) .. ":" .. tostring(heightBucket)
+        local score = (radius / maxRadius)
+          -- Reward terrain that is comfortably above sea level without making
+          -- the selector over-prefer the tallest mountain peaks every time.
+          + math.min((surfaceBlockY - SEA_LEVEL) / ELEVATION_SCORE_SCALE, 1) * ELEVATION_SCORE_WEIGHT
+          - getRecentSpawnPenalty(bucketKey)
+
+        if surfaceId == GRASS_ID then
+          score = score + GRASS_SPAWN_PREFERENCE_BONUS
+        end
+
+        local candidate = {
+          blockX = blockX,
+          blockZ = blockZ,
+          surfaceBlockY = surfaceBlockY,
+          bucketKey = bucketKey,
+          score = score,
+        }
+
+        if not bestCandidate or candidate.score > bestCandidate.score then
+          bestCandidate = candidate
+        end
+      end
+    end
+  end
+
+  if bestCandidate then
+    pushRecentSpawnBucket(bestCandidate.bucketKey)
+    return bestCandidate
+  end
+
+  local fallbackCX, fallbackCZ, fallbackLocalX, fallbackLocalZ = getChunkCoords(mapConfig.SpawnBlockX, mapConfig.SpawnBlockZ)
+  local fallbackChunk = ChunkService.requestChunk(fallbackCX, fallbackCZ, nil)
+  local surfaceBlockY = math.max(WorldConstants.SURFACE_Y_DEFAULT or FALLBACK_SURFACE_Y, SEA_LEVEL + 2)
+  if fallbackChunk then
+    surfaceBlockY = findSafeSurface(fallbackChunk, fallbackLocalX, fallbackLocalZ) or surfaceBlockY
+  end
+
+  return {
+    blockX = mapConfig.SpawnBlockX,
+    blockZ = mapConfig.SpawnBlockZ,
+    surfaceBlockY = surfaceBlockY,
+  }
+end
+
 
 --- onPlayerAdded: Load profile, create Replica, spawn character
 function PlayerManager.onPlayerAdded(player)
@@ -72,31 +211,10 @@ function PlayerManager.onPlayerAdded(player)
     -- Wait one frame for the character to fully initialize before moving it
     task.wait()
 
-    -- Spawn at block origin (0, 0) — change these to set a different spawn column
-    local spawnBlockX = mapConfig.SpawnBlockX
-    local spawnBlockZ = mapConfig.SpawnBlockZ
-    local cx = math.floor(spawnBlockX / ChunkConstants.CHUNK_SIZE)
-    local cz = math.floor(spawnBlockZ / ChunkConstants.CHUNK_SIZE)
-    local localX = spawnBlockX - cx * ChunkConstants.CHUNK_SIZE
-    local localZ = spawnBlockZ - cz * ChunkConstants.CHUNK_SIZE
-
-    -- Request the chunk server-side (generates if missing)
-    local chunk = ChunkService.requestChunk(cx, cz, nil)
-
-    local surfaceBlockY = WorldConstants.SURFACE_Y_DEFAULT or 64
-
-    -- Find the highest non-air block in the spawn column
-    if chunk then
-      for y = ChunkConstants.CHUNK_HEIGHT - 1, 0, -1 do
-        local id = chunk:getBlock(localX, y, localZ)
-        if id ~= 0 then
-          surfaceBlockY = y
-          break
-        end
-      end
-    else
-      warn("[PlayerManager] Chunk not available at cx=" .. cx .. " cz=" .. cz .. ", using default surface Y.")
-    end
+    local spawnColumn = selectSpawnColumn(player)
+    local spawnBlockX = spawnColumn.blockX
+    local spawnBlockZ = spawnColumn.blockZ
+    local surfaceBlockY = spawnColumn.surfaceBlockY
 
     -- Convert block coords to world studs
     -- A block at index y occupies world Y range: [y * BLOCK_SIZE, (y+1) * BLOCK_SIZE]

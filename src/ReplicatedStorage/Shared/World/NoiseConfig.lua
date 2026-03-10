@@ -20,12 +20,28 @@ local WorldGenConfig = require(WorldFolder:WaitForChild("WorldGenConfig"))
 local terrainConfig = WorldGenConfig.Terrain
 local MIN_DETAIL_SCALE = terrainConfig.MinDetailScale
 local ELEVATION_DETAIL_FACTOR = terrainConfig.ElevationDetailFactor
+local MOUNTAIN_DETAIL_BOOST = terrainConfig.MountainDetailBoost
+-- Elevation is layered in three parts:
+-- 1) a broad continental base shared by all landforms,
+-- 2) a rolling-hill lift enabled by the landform mask,
+-- 3) an additional mountain lift reserved for the mountain mask.
+local BASE_ELEVATION_FLOOR = 0.16
+local CONTINENTAL_ELEVATION_WEIGHT = 0.34
+local HILL_ELEVATION_BASE = 0.08
+local HILL_ELEVATION_WEIGHT = 0.10
+local MOUNTAIN_ELEVATION_WEIGHT = 0.32
 
 NoiseConfig.TERRAIN = {
 
 	-- Continental shaping — lower frequency for more spread-out biomes
 	CONT_SCALE = terrainConfig.CONT_SCALE,  -- broader plains and mountain ranges
 	CONT_SEED  = terrainConfig.CONT_SEED, -- randomized at module load when a new session starts
+
+	-- Low-frequency terrain-type mask to mix plains, rolling hills, and mountains
+	LANDFORM_SCALE = terrainConfig.LandformScale,
+	LANDFORM_SEED  = terrainConfig.LandformSeed,
+	HILL_START     = terrainConfig.HillStart,
+	MOUNTAIN_START = terrainConfig.MountainStart,
 
 	-- fBm detail octaves: tuned toward broader, smoother landforms
 	OCTAVES = terrainConfig.OCTAVES,
@@ -69,6 +85,16 @@ local function smoothstep(x)
 	return x * x * (3 - 2 * x)
 end
 
+local function inverseLerp(a, b, value)
+	if a == b then
+		-- A collapsed range means the corresponding mask is effectively disabled,
+		-- so fall back to 0 rather than inventing extra hill/mountain influence.
+		return 0
+	end
+
+	return math.clamp((value - a) / (b - a), 0, 1)
+end
+
 local function sampleNoise(x, z, scale, seed)
 	local cfg = NoiseConfig.TERRAIN
 	local sum = 0
@@ -96,11 +122,20 @@ function NoiseConfig.GetContinentalness(x, z)
 	return smoothstep(math.clamp((n + 1) * 0.5, 0, 1))
 end
 
+function NoiseConfig.GetLandformMix(x, z)
+	local cfg = NoiseConfig.TERRAIN
+	local n = sampleNoise(x, z, cfg.LANDFORM_SCALE, cfg.LANDFORM_SEED)
+	return math.clamp((n + 1) * 0.5, 0, 1)
+end
+
 function NoiseConfig.GetHeight(x, z)
 	local cfg = NoiseConfig.TERRAIN
 	local cont = NoiseConfig.GetContinentalness(x, z)
+	local landform = NoiseConfig.GetLandformMix(x, z)
+	local hillMask = smoothstep(inverseLerp(cfg.HILL_START, cfg.MOUNTAIN_START, landform))
+	local mountainMask = smoothstep(inverseLerp(cfg.MOUNTAIN_START, 1, landform))
 
-	-- Oversampled detail (this is what removes sharpness)
+	-- Oversampled detail for terrain texture without the old spike-heavy extremes.
 	local detail = 0
 	local ampSum = 0
 	for _, octave in ipairs(cfg.OCTAVES) do
@@ -116,12 +151,21 @@ function NoiseConfig.GetHeight(x, z)
 	-- Safe after the early return above; detail is now normalized to a predictable range.
 	detail = detail / ampSum
 
-	-- Flat areas keep a little shape, while higher continental terrain gets more variation.
-	detail = detail * (MIN_DETAIL_SCALE + cont * cont * ELEVATION_DETAIL_FACTOR)
+	-- Plains stay broad and calm, hills get moderate variation, and only the
+	-- mountain mask unlocks the larger peaks/valleys.
+	local baseElevation = BASE_ELEVATION_FLOOR + cont * CONTINENTAL_ELEVATION_WEIGHT
+	local rollingLift = hillMask * (HILL_ELEVATION_BASE + cont * HILL_ELEVATION_WEIGHT)
+	local mountainLift = mountainMask * cont * cont * MOUNTAIN_ELEVATION_WEIGHT
+	local normalizedHeight = math.clamp(baseElevation + rollingLift + mountainLift, 0, 1)
+	local detailStrength = MIN_DETAIL_SCALE
+		+ hillMask * ELEVATION_DETAIL_FACTOR
+		+ mountainMask * MOUNTAIN_DETAIL_BOOST
+
+	detail = detail * detailStrength
 	detail = detail + sampleNoise(x, z, cfg.BASE_SCALE, cfg.BASE_SEED) * cfg.BASE_AMP
 
 	-- Final height (detail is normalized so the shaping stays smooth and predictable)
-	local finalHeight = cfg.HEIGHT_MIN + (heightRange * cont) + (detail * heightRange)
+	local finalHeight = cfg.HEIGHT_MIN + (heightRange * normalizedHeight) + (detail * heightRange)
 
 	return clampHeight(cfg, finalHeight)
 end
