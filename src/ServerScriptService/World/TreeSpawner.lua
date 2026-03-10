@@ -259,47 +259,52 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 		for z = 0, CHUNK_SIZE - 1, sampleStride do
 			local wz = originZ + z
 			
-			-- Check tree density (clustering)
+			-- Sequential checks using a skip flag (avoid goto)
+			local shouldSpawn = true
 			local density = getTreeDensity(wx, wz)
 			if density < TREE_CLUSTER_THRESHOLD then
-				-- This area is too sparse for trees
-				goto continue
+				shouldSpawn = false
 			end
 			
 			-- Random chance based on density (not every valid spot gets a tree)
 			local spawnChance = (density - TREE_CLUSTER_THRESHOLD) / (1 - TREE_CLUSTER_THRESHOLD)
-			if math.random() > spawnChance * 0.3 then  -- 30% max spawn rate in dense areas
-				goto continue
+			if spawnChance <= 0 or math.random() > spawnChance * 0.3 then  -- 30% max spawn rate in dense areas
+				shouldSpawn = false
 			end
 			
 			-- Check spacing
-			if isTooCloseToExistingTree(wx, wz, cx, cz) then
-				goto continue
+			if shouldSpawn and isTooCloseToExistingTree(wx, wz, cx, cz) then
+				shouldSpawn = false
 			end
 			
 			-- Find surface Y
-			local surfaceY = findSurfaceY(chunk, x, z)
-			if not surfaceY then
-				goto continue
+			local surfaceY = nil
+			if shouldSpawn then
+				surfaceY = findSurfaceY(chunk, x, z)
+				if not surfaceY then
+					shouldSpawn = false
+				end
 			end
 			
 			-- Check if surface is grass
-			if not isGrassSurface(chunk, x, surfaceY, z) then
-				goto continue
+			if shouldSpawn and not isGrassSurface(chunk, x, surfaceY, z) then
+				shouldSpawn = false
 			end
 			
 			-- Check slope
-			local slope = calculateSlope(chunk, x, z, wx, wz)
-			if slope > MAX_SLOPE_FOR_TREES then
-				goto continue
+			if shouldSpawn then
+				local slope = calculateSlope(chunk, x, z, wx, wz)
+				if slope > MAX_SLOPE_FOR_TREES then
+					shouldSpawn = false
+				end
 			end
 			
-			-- Spawn the tree
-			if spawnTree(wx, surfaceY + 1, wz, parentFolder) then
-				recordTreePosition(wx, wz, cx, cz)
+			-- Spawn the tree if all checks passed
+			if shouldSpawn then
+				if spawnTree(wx, surfaceY + 1, wz, parentFolder) then
+					recordTreePosition(wx, wz, cx, cz)
+				end
 			end
-			
-			::continue::
 		end
 	end
 end

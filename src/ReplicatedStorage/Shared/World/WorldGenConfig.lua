@@ -11,9 +11,9 @@ WorldGenConfig.Map = {
 	SpawnBlockX = 0,
 	SpawnBlockZ = 0,
 	WorldSizeChunks = 1024, -- 1024x1024 chunk world bounds
-	SpawnSafeRadius = 192,
-	RenderDistance = 10,
-	ChunkHeight = 160,
+	SpawnSafeRadius = 5,
+	RenderDistance = 15,
+	ChunkHeight = 128,
 }
 
 WorldGenConfig.Terrain = {
