@@ -40,14 +40,20 @@ local function getTreesFolder()
 	
 	local world = Workspace:FindFirstChild("World")
 	if not world then
-		warn("[TreeGenerationService] World folder not found in Workspace")
-		return nil
+		-- Create World folder if it doesn't exist (expected on first run)
+		Logger.Info("[TreeGenerationService] World folder not found in Workspace, creating it...")
+		world = Instance.new("Folder")
+		world.Name = "World"
+		world.Parent = Workspace
 	end
 	
 	_treesFolder = world:FindFirstChild("Trees")
 	if not _treesFolder then
-		warn("[TreeGenerationService] Trees folder not found in Workspace.World")
-		return nil
+		-- Create Trees folder if it doesn't exist
+		Logger.Info("[TreeGenerationService] Trees folder not found in Workspace.World, creating it...")
+		_treesFolder = Instance.new("Folder")
+		_treesFolder.Name = "Trees"
+		_treesFolder.Parent = world
 	end
 	
 	return _treesFolder
@@ -69,11 +75,8 @@ function TreeGenerationService.init()
 	_treesSpawned = {}
 	_treesFolder = nil
 	
-	-- Verify Trees folder exists
-	local folder = getTreesFolder()
-	if not folder then
-		warn("[TreeGenerationService] Trees folder missing. Trees will not spawn.")
-	end
+	-- Ensure Trees folder exists (will be created if missing)
+	getTreesFolder()
 	
 	Logger.Info("[TreeGenerationService] Ready")
 end
@@ -92,10 +95,8 @@ function TreeGenerationService.spawnTreesForChunk(chunk)
 		return
 	end
 	
+	-- Get or create trees folder
 	local treesFolder = getTreesFolder()
-	if not treesFolder then
-		return
-	end
 	
 	-- Spawn trees in this chunk
 	TreeSpawner.spawnTreesInChunk(chunk, treesFolder)

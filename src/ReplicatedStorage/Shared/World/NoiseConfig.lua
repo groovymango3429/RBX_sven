@@ -75,6 +75,11 @@ NoiseConfig.TERRAIN = {
 	-- Oversampling for smoothness
 	OVERSAMPLE_SIZE = terrainConfig.OVERSAMPLE_SIZE,
 	
+	-- Height dithering to reduce voxel quantization
+	DITHER_SEED = terrainConfig.DITHER_SEED,
+	DITHER_SCALE = terrainConfig.DITHER_SCALE,
+	DITHER_AMOUNT = terrainConfig.DITHER_AMOUNT,
+	
 	-- Mountain amplification
 	MOUNTAIN_AMP_THRESHOLD = terrainConfig.MOUNTAIN_AMP_THRESHOLD,
 	MOUNTAIN_AMP_FACTOR = terrainConfig.MOUNTAIN_AMP_FACTOR,
@@ -132,6 +137,23 @@ end
 
 local function clampHeight(cfg, height)
 	return math.clamp(height, cfg.HEIGHT_MIN, cfg.HEIGHT_MAX)
+end
+
+-- Add position-based micro-dither to break up voxel quantization
+-- This creates subtle height variations that smooth out stair-stepping
+local function applyHeightDither(x, z, height)
+	local cfg = NoiseConfig.TERRAIN
+	
+	-- Apply high-frequency noise (range [-1, 1]) with seed offset for variation
+	-- Use seed as coordinate offset to create independent noise layer
+	local ditherNoise = math.noise(
+		(x + cfg.DITHER_SEED) * cfg.DITHER_SCALE, 
+		(z + cfg.DITHER_SEED) * cfg.DITHER_SCALE, 
+		cfg.DITHER_SEED
+	)
+	local dither = ditherNoise * cfg.DITHER_AMOUNT
+	
+	return height + dither
 end
 
 function NoiseConfig.GetContinentalness(x, z)
@@ -197,6 +219,10 @@ function NoiseConfig.GetHeight(x, z)
 		-- Multiply the excess height by the amplification factor, scaled by how high we are
 		finalHeight = baseHeight + (heightAboveThreshold * (1 + amplificationMask * (cfg.MOUNTAIN_AMP_FACTOR - 1)))
 	end
+	
+	-- Apply height dithering to break up voxel quantization and reduce stair-stepping
+	-- This allows us to use low oversampling (2) while maintaining smooth terrain
+	finalHeight = applyHeightDither(x, z, finalHeight)
 
 	return clampHeight(cfg, finalHeight)
 end

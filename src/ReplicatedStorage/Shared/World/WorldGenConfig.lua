@@ -52,7 +52,12 @@ WorldGenConfig.Terrain = {
 	SURFACE_BLEND_BAND = 4,
 	BEACH_CONTINENTALNESS = 0.34,
 	UNDERGROUND_DEPTH = 18,
-	OVERSAMPLE_SIZE = 4,
+	OVERSAMPLE_SIZE = 2,  -- Reduced from 4 for better performance while maintaining smoothness
+	
+	-- Height dithering to reduce voxel quantization artifacts
+	DITHER_SEED = 9999,
+	DITHER_SCALE = 0.25,   -- High frequency for fine-grain variation
+	DITHER_AMOUNT = 0.4,   -- Maximum dither in blocks (±0.4)
 	
 	-- Mountain peak amplification (multiply high elevations to create steeper peaks)
 	MOUNTAIN_AMP_THRESHOLD = 0.72,  -- Heights above this get amplified
