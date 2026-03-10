@@ -104,7 +104,7 @@ function TreeGenerationService.spawnTreesForChunk(chunk)
 	_treesSpawned[key] = true
 end
 
---- clearChunkTrees: Remove spawned trees for a chunk when it's unloaded
+--- Clear cached tree positions for a chunk (call when chunk is unloaded)
 -- @param cx number - Chunk X coordinate
 -- @param cz number - Chunk Z coordinate
 function TreeGenerationService.clearChunkTrees(cx, cz)
@@ -112,16 +112,10 @@ function TreeGenerationService.clearChunkTrees(cx, cz)
 	_treesSpawned[key] = nil
 	TreeSpawner.clearChunkCache(cx, cz)
 	
-	-- Also remove tree instances from workspace
-	local treesFolder = getTreesFolder()
-	if not treesFolder then
-		return
-	end
-	
-	-- Trees are tagged with chunk coordinates in their name or we'd need
-	-- to track them separately. For now, we'll rely on the cache clearing.
-	-- In a production system, you might want to tag tree instances with
-	-- their chunk coordinates and clean them up here.
+	-- NOTE: Tree instances are not automatically removed from workspace when chunks unload.
+	-- In a full implementation, you would need to track spawned tree instances per chunk
+	-- (e.g., by tagging them with chunk coordinates) and remove them here to prevent
+	-- memory leaks. For now, trees persist once spawned.
 end
 
 return TreeGenerationService

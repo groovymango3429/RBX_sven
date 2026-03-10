@@ -203,13 +203,13 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	-- Apply random scale variation
 	local randomScale = SCALE_MIN + (math.random() * (SCALE_MAX - SCALE_MIN))
 	if tree.PrimaryPart then
-		local originalCFrame = tree.PrimaryPart.CFrame
-		
 		-- Scale all parts in the model
 		for _, part in ipairs(tree:GetDescendants()) do
 			if part:IsA("BasePart") then
+				local offset = tree.PrimaryPart.CFrame:ToObjectSpace(part.CFrame)
 				part.Size = part.Size * randomScale
-				part.CFrame = originalCFrame:ToWorldSpace(originalCFrame:ToObjectSpace(part.CFrame) * randomScale)
+				-- Scale the offset position relative to PrimaryPart
+				part.CFrame = tree.PrimaryPart.CFrame:ToWorldSpace(CFrame.new(offset.Position * randomScale) * (offset - offset.Position))
 			end
 		end
 	end
@@ -217,11 +217,10 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	-- Position the tree (convert block coordinates to world position)
 	local worldPos = Vector3.new(wx * BLOCK_SIZE, wy * BLOCK_SIZE, wz * BLOCK_SIZE)
 	if tree.PrimaryPart then
-		tree:SetPrimaryPartCFrame(CFrame.new(worldPos))
-		
 		-- Apply random Y-axis rotation
 		local randomRotation = math.random() * 360
-		tree:SetPrimaryPartCFrame(tree.PrimaryPart.CFrame * CFrame.Angles(0, math.rad(randomRotation), 0))
+		local rotatedCFrame = CFrame.new(worldPos) * CFrame.Angles(0, math.rad(randomRotation), 0)
+		tree:PivotTo(rotatedCFrame)
 	end
 	
 	-- Parent to the world
@@ -244,12 +243,12 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 	local originX = cx * CHUNK_SIZE
 	local originZ = cz * CHUNK_SIZE
 	
-	-- Sample tree spawning with some spacing (not every block)
-	local SAMPLE_STRIDE = 2  -- Check every 2 blocks for performance
+	-- Sample tree spawning with some spacing for performance (not every block)
+	local sampleStride = 2  -- Check every 2 blocks
 	
-	for x = 0, CHUNK_SIZE - 1, SAMPLE_STRIDE do
+	for x = 0, CHUNK_SIZE - 1, sampleStride do
 		local wx = originX + x
-		for z = 0, CHUNK_SIZE - 1, SAMPLE_STRIDE do
+		for z = 0, CHUNK_SIZE - 1, sampleStride do
 			local wz = originZ + z
 			
 			-- Check tree density (clustering)

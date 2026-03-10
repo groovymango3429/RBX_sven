@@ -186,11 +186,15 @@ function NoiseConfig.GetHeight(x, z)
 	-- Final height (detail is normalized so the shaping stays smooth and predictable)
 	local finalHeight = cfg.HEIGHT_MIN + (heightRange * normalizedHeight) + (detail * heightRange)
 	
-	-- Mountain peak amplification: multiply heights above threshold to create steeper peaks
+	-- Mountain peak amplification: multiply heights above threshold to create steeper peaks.
+	-- When terrain is above MOUNTAIN_AMP_THRESHOLD (0.72), we amplify it to create dramatic cliffs.
+	-- amplificationMask goes from 0 at threshold to 1 at maximum height (smooth transition).
+	-- This creates Minecraft-style steep mountains while keeping plains and hills smooth.
 	if normalizedHeight > cfg.MOUNTAIN_AMP_THRESHOLD then
 		local amplificationMask = (normalizedHeight - cfg.MOUNTAIN_AMP_THRESHOLD) / (1 - cfg.MOUNTAIN_AMP_THRESHOLD)
 		local baseHeight = cfg.HEIGHT_MIN + (heightRange * cfg.MOUNTAIN_AMP_THRESHOLD)
 		local heightAboveThreshold = finalHeight - baseHeight
+		-- Multiply the excess height by the amplification factor, scaled by how high we are
 		finalHeight = baseHeight + (heightAboveThreshold * (1 + amplificationMask * (cfg.MOUNTAIN_AMP_FACTOR - 1)))
 	end
 
