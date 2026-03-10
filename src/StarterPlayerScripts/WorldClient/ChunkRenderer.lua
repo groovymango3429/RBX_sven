@@ -41,9 +41,10 @@ local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE    -- 9
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT  -- 128
 local BLOCK_SIZE   = ChunkConstants.BLOCK_SIZE    -- 4 studs per block
 local ID_WATER     = BlockRegistry.getId("water")
--- Prevent an exactly integral terrain height from producing 0 occupancy,
--- which would hide the surface voxel entirely when written to Roblox Terrain.
-local SURFACE_OCCUPANCY_EPSILON = 1e-4
+-- Keep the top material visibly present even when the sampled height lands
+-- very close to an integer voxel boundary; otherwise the full dirt voxel below
+-- can dominate and create blotchy patches on grassy slopes.
+local MIN_SURFACE_OCCUPANCY = 0.35
 
 local _renderedChunks = {}  -- chunkKey → true (rendered) | false (unloading/aborted) | nil (not loaded)
 
@@ -78,6 +79,7 @@ local _BLOCK_TO_TERRAIN = {
   [4]  = Enum.Material.Sand,    -- sand
   [5]  = Enum.Material.Ground,  -- gravel
   [10] = Enum.Material.Rock,    -- bedrock
+  [11] = Enum.Material.Water,   -- water
   [17] = Enum.Material.Ground,  -- clay
   [18] = Enum.Material.Snow,    -- snow
 }
@@ -89,8 +91,8 @@ end
 local function _getSurfaceOccupancy(height)
   local surfaceY = math.floor(height)
   local fractional = height - surfaceY
-  if fractional < SURFACE_OCCUPANCY_EPSILON then
-    fractional = SURFACE_OCCUPANCY_EPSILON
+  if fractional < MIN_SURFACE_OCCUPANCY then
+    fractional = MIN_SURFACE_OCCUPANCY
   end
   return surfaceY, math.clamp(fractional, 0, 1)
 end
