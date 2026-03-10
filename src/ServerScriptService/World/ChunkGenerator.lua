@@ -3,15 +3,15 @@
   ==============
   Procedural terrain generation using continental noise + multi-octave Perlin.
 
-  Terrain layout per column  (H = noise-derived surface height)
-  -------------------------------------------------------------
-    Y = 0               → Bedrock
-    Y = 1 … H-DEPTH     → Air  (not filled — left as 0 for performance)
-    Y = H-DEPTH+1 … H-2 → Stone
-    Y = H-1             → Sub-surface block (dirt / sand / stone)
-    Y = H               → Surface block     (grass / sand / stone / snow)
-    Y = H+1 … WATER_LVL → Water (only when H < WATER_LEVEL)
-    Y > max(H, WATER_LVL) → Air
+  Terrain layout per column  (H = continuous noise-derived surface height)
+  -----------------------------------------------------------------------
+    Y = 0                        → Bedrock
+    Y = 1 … floor(H)-DEPTH       → Air  (not filled — left as 0 for performance)
+    Y = floor(H)-DEPTH+1 … floor(H)-2 → Stone
+    Y = floor(H)-1               → Sub-surface block (dirt / sand / stone)
+    Y = floor(H)                 → Surface block     (grass / sand / stone / snow)
+    Y = floor(H)+1 … WATER_LVL   → Water (only when H < WATER_LEVEL)
+    Y > max(floor(H), WATER_LVL) → Air
 
   Height shaping (oversampled)
   ----------------------------
@@ -83,7 +83,7 @@ local ChunkGenerator = {}
 -- ────────────────────────────────────────────────────────────────────────────
 
 --- _getHeight: Sample the noise heightmap at world position (wx, wz).
--- Returns an integer block Y clamped to [HEIGHT_MIN, HEIGHT_MAX].
+-- Returns a continuous surface height clamped to [HEIGHT_MIN, HEIGHT_MAX].
 local function _getHeight(wx, wz)
 	return math.clamp(NoiseConfig.GetHeight(wx, wz), HEIGHT_MIN, HEIGHT_MAX)
 end
@@ -136,6 +136,7 @@ function ChunkGenerator.generateNoise(cx, cz)
 
 			-- Surface height for this column
 			local surfH    = _getHeight(wx, originZ + z)
+			local surfY    = math.floor(surfH)
 			-- Base flat index for (x, y=0, z) — adding y*S gives (x, y, z)
 			local base     = xStride + z + 1
 
@@ -143,23 +144,23 @@ function ChunkGenerator.generateNoise(cx, cz)
 			blocks[base] = ID_BEDROCK
 
 			-- ── Stone fill ────────────────────────────────────────────────
-			-- Only fill from (surfH - DEPTH + 1) down to (surfH - 2).
-			-- Y = 1 .. surfH - DEPTH remain air for performance.
-			local stoneStart = math.max(1, surfH - DEPTH + 1)
-			local stoneEnd   = surfH - 2
+			-- Only fill from (surfY - DEPTH + 1) down to (surfY - 2).
+			-- Y = 1 .. surfY - DEPTH remain air for performance.
+			local stoneStart = math.max(1, surfY - DEPTH + 1)
+			local stoneEnd   = surfY - 2
 			for y = stoneStart, stoneEnd do
 				blocks[base + y * S] = ID_STONE
 			end
 
 			-- ── Sub-surface block (dirt / sand) ───────────────────────────
-			local subY = surfH - 1
+			local subY = surfY - 1
 			if subY >= 1 and subY < H then
 				blocks[base + subY * S] = _getSubSurfaceBlock(surfH)
 			end
 
 			-- ── Top surface block (grass / sand / stone / snow) ───────────
-			if surfH >= 0 and surfH < H then
-				blocks[base + surfH * S] = _getSurfaceBlock(surfH)
+			if surfY >= 0 and surfY < H then
+				blocks[base + surfY * S] = _getSurfaceBlock(surfH)
 			end
 
 			-- ── Water fill (columns below sea level) ──────────────────────
@@ -168,7 +169,7 @@ function ChunkGenerator.generateNoise(cx, cz)
 			-- WATER_LEVEL (50) is always well below CHUNK_HEIGHT (128),
 			-- so no upper-bound clamp against H is required here.
 			if surfH < WATER_LEVEL then
-				for y = surfH + 1, WATER_LEVEL do
+				for y = surfY + 1, WATER_LEVEL do
 					blocks[base + y * S] = ID_WATER
 				end
 			end
