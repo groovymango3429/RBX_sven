@@ -144,8 +144,13 @@ end
 local function applyHeightDither(x, z, height)
 	local cfg = NoiseConfig.TERRAIN
 	
-	-- Apply high-frequency noise (range [-1, 1]) with seed to create rapid sub-voxel variations
-	local ditherNoise = math.noise(x * cfg.DITHER_SCALE, z * cfg.DITHER_SCALE, cfg.DITHER_SEED)
+	-- Apply high-frequency noise (range [-1, 1]) with seed offset for variation
+	-- Use seed as coordinate offset to create independent noise layer
+	local ditherNoise = math.noise(
+		(x + cfg.DITHER_SEED) * cfg.DITHER_SCALE, 
+		(z + cfg.DITHER_SEED) * cfg.DITHER_SCALE, 
+		cfg.DITHER_SEED
+	)
 	local dither = ditherNoise * cfg.DITHER_AMOUNT
 	
 	return height + dither
