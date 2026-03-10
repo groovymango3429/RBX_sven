@@ -269,15 +269,12 @@ local function spawnTree(wx, wy, wz, parentFolder)
 		local randomRotation = math.random() * 360
 		local rotatedCFrame = CFrame.new(worldPos) * CFrame.Angles(0, math.rad(randomRotation), 0)
 		tree:PivotTo(rotatedCFrame)
-		print(string.format("[TreeSpawner] DEBUG: Spawned tree at world position (%.1f, %.1f, %.1f) | Block: (%d, %d, %d)",
-			worldPos.X, worldPos.Y, worldPos.Z, wx, wy, wz))
 	else
 		warn(string.format("[TreeSpawner] DEBUG: Tree '%s' still has no PrimaryPart after attempting to set one!", tree.Name))
 	end
 	
 	-- Parent to the world
 	tree.Parent = parentFolder
-	print(string.format("[TreeSpawner] DEBUG: Tree parented to %s", parentFolder:GetFullName()))
 	
 	return true
 end
@@ -322,12 +319,10 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 			
 			-- Sequential checks using a skip flag (avoid goto)
 			local shouldSpawn = true
-			local failReason = ""
 			
 			local density = getTreeDensity(wx, wz)
 			if density < TREE_CLUSTER_THRESHOLD then
 				shouldSpawn = false
-				failReason = "density"
 				chunkStats.failedDensity = chunkStats.failedDensity + 1
 			end
 			
@@ -336,7 +331,6 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 				local spawnChance = (density - TREE_CLUSTER_THRESHOLD) / (1 - TREE_CLUSTER_THRESHOLD)
 				if spawnChance <= 0 or math.random() > spawnChance * 0.3 then  -- 30% max spawn rate in dense areas
 					shouldSpawn = false
-					failReason = "random_chance"
 					chunkStats.failedChance = chunkStats.failedChance + 1
 				end
 			end
@@ -344,7 +338,6 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 			-- Check spacing
 			if shouldSpawn and isTooCloseToExistingTree(wx, wz, cx, cz) then
 				shouldSpawn = false
-				failReason = "spacing"
 				chunkStats.failedSpacing = chunkStats.failedSpacing + 1
 			end
 			
@@ -354,7 +347,6 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 				surfaceY = findSurfaceY(chunk, x, z)
 				if not surfaceY then
 					shouldSpawn = false
-					failReason = "no_surface"
 					chunkStats.failedNoSurface = chunkStats.failedNoSurface + 1
 				end
 			end
@@ -362,7 +354,6 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 			-- Check if surface is grass
 			if shouldSpawn and not isGrassSurface(chunk, x, surfaceY, z) then
 				shouldSpawn = false
-				failReason = "not_grass"
 				chunkStats.failedNotGrass = chunkStats.failedNotGrass + 1
 			end
 			
@@ -371,7 +362,6 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 				local slope = calculateSlope(chunk, x, z, wx, wz)
 				if slope > MAX_SLOPE_FOR_TREES then
 					shouldSpawn = false
-					failReason = "slope"
 					chunkStats.failedSlope = chunkStats.failedSlope + 1
 				end
 			end
