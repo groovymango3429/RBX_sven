@@ -73,6 +73,18 @@ NoiseConfig.TERRAIN = {
 
 	-- Oversampling for smoothness
 	OVERSAMPLE_SIZE = terrainConfig.OVERSAMPLE_SIZE,
+	
+	-- Mountain amplification
+	MOUNTAIN_AMP_THRESHOLD = terrainConfig.MOUNTAIN_AMP_THRESHOLD,
+	MOUNTAIN_AMP_FACTOR = terrainConfig.MOUNTAIN_AMP_FACTOR,
+	
+	-- Water features
+	LAKE_THRESHOLD = terrainConfig.LAKE_THRESHOLD,
+	LAKE_DEPTH_OFFSET = terrainConfig.LAKE_DEPTH_OFFSET,
+	RIVER_SCALE = terrainConfig.RIVER_SCALE,
+	RIVER_SEED = terrainConfig.RIVER_SEED,
+	RIVER_THRESHOLD = terrainConfig.RIVER_THRESHOLD,
+	RIVER_DEPTH = terrainConfig.RIVER_DEPTH,
 }
 
 -- Randomize seeds when module loads so each session gets a different world
@@ -158,6 +170,7 @@ function NoiseConfig.GetHeight(x, z)
 
 	-- Plains stay broad and calm, hills get moderate variation, and only the
 	-- mountain mask unlocks the larger peaks/valleys.
+	-- Adjusted to create more flat plains by reducing base elevation floor
 	local baseElevation = BASE_ELEVATION_FLOOR + cont * CONTINENTAL_ELEVATION_WEIGHT
 	local rollingLift = hillMask * (HILL_ELEVATION_BASE + cont * HILL_ELEVATION_WEIGHT)
 	local mountainLift = mountainMask * cont * cont * MOUNTAIN_ELEVATION_WEIGHT
@@ -171,8 +184,34 @@ function NoiseConfig.GetHeight(x, z)
 
 	-- Final height (detail is normalized so the shaping stays smooth and predictable)
 	local finalHeight = cfg.HEIGHT_MIN + (heightRange * normalizedHeight) + (detail * heightRange)
+	
+	-- Mountain peak amplification: multiply heights above threshold to create steeper peaks
+	if normalizedHeight > cfg.MOUNTAIN_AMP_THRESHOLD then
+		local amplificationMask = (normalizedHeight - cfg.MOUNTAIN_AMP_THRESHOLD) / (1 - cfg.MOUNTAIN_AMP_THRESHOLD)
+		local baseHeight = cfg.HEIGHT_MIN + (heightRange * cfg.MOUNTAIN_AMP_THRESHOLD)
+		local heightAboveThreshold = finalHeight - baseHeight
+		finalHeight = baseHeight + (heightAboveThreshold * (1 + amplificationMask * (cfg.MOUNTAIN_AMP_FACTOR - 1)))
+	end
 
 	return clampHeight(cfg, finalHeight)
+end
+
+-- Get river influence at a position (returns 0-1, higher means river presence)
+function NoiseConfig.GetRiverInfluence(x, z)
+	local cfg = NoiseConfig.TERRAIN
+	local riverNoise = math.abs(sampleNoise(x, z, cfg.RIVER_SCALE, cfg.RIVER_SEED))
+	-- Rivers form along low values (near zero after abs)
+	if riverNoise < cfg.RIVER_THRESHOLD then
+		return 1 - (riverNoise / cfg.RIVER_THRESHOLD)
+	end
+	return 0
+end
+
+-- Check if position should be a lake
+function NoiseConfig.IsLakePosition(x, z, continentalness)
+	local cfg = NoiseConfig.TERRAIN
+	-- Lakes form in low continentalness areas (inland basins/valleys)
+	return continentalness < cfg.LAKE_THRESHOLD
 end
 
 return NoiseConfig

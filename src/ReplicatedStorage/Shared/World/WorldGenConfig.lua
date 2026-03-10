@@ -53,6 +53,36 @@ WorldGenConfig.Terrain = {
 	BEACH_CONTINENTALNESS = 0.34,
 	UNDERGROUND_DEPTH = 18,
 	OVERSAMPLE_SIZE = 2,
+	
+	-- Mountain peak amplification (multiply high elevations to create steeper peaks)
+	MOUNTAIN_AMP_THRESHOLD = 0.72,  -- Heights above this get amplified
+	MOUNTAIN_AMP_FACTOR = 1.5,       -- Multiplier for steep mountain peaks
+	
+	-- Water feature generation
+	LAKE_THRESHOLD = 0.25,           -- Continentalness below this can form lakes
+	LAKE_DEPTH_OFFSET = 4,           -- How much lower lakes sit than surroundings
+	RIVER_SCALE = 0.008,             -- Noise scale for river paths
+	RIVER_SEED = 3500,
+	RIVER_THRESHOLD = 0.15,          -- Narrower means fewer/thinner rivers
+	RIVER_DEPTH = 3,                 -- How deep rivers carve into terrain
+}
+
+WorldGenConfig.Trees = {
+	-- Tree density/clustering noise
+	TREE_DENSITY_SCALE = 0.02,
+	TREE_DENSITY_SEED = 5000,
+	TREE_CLUSTER_THRESHOLD = 0.4,  -- Above this value, trees can spawn (0-1)
+	
+	-- Spawning rules
+	MIN_TREE_SPACING = 6,          -- Minimum blocks between trees
+	MAX_SLOPE_FOR_TREES = 0.4,     -- Maximum terrain slope (rise/run) for tree spawning
+	
+	-- Variation
+	SCALE_MIN = 0.85,              -- Minimum random scale multiplier
+	SCALE_MAX = 1.15,              -- Maximum random scale multiplier
+	
+	-- Tree models folder path (relative to ReplicatedStorage)
+	TREE_MODELS_PATH = "Shared/Environment/Trees",
 }
 
 return table.freeze(WorldGenConfig)

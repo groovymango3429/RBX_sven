@@ -35,6 +35,7 @@ local Logger          = require(Shared.Core:WaitForChild("Logger"))
 local ChunkConstants  = require(WorldFolder:WaitForChild("ChunkConstants"))
 local ChunkSerializer = require(WorldFolder:WaitForChild("ChunkSerializer"))
 local ChunkService    = require(WorldScripts:WaitForChild("ChunkService"))
+local TreeGenerationService = require(WorldScripts:WaitForChild("TreeGenerationService"))
 
 -- Radius of the world grid that is generated when the button is clicked.
 -- Changing RENDER_DISTANCE in ChunkConstants automatically adjusts this.
@@ -112,6 +113,10 @@ local function generateMapForPlayer(player)
 
 		local cx, cz  = coords[1], coords[2]
 		local chunk   = ChunkService.requestChunk(cx, cz, player)
+		
+		-- Spawn trees in this chunk after terrain generation
+		TreeGenerationService.spawnTreesForChunk(chunk)
+		
 		local payload = ChunkSerializer.serialize(chunk)
 		sendRemote:FireClient(player, payload)
 

@@ -1,0 +1,10 @@
+# Tree Models Directory
+
+Place tree model files (.rbxm or .rbxmx) in this folder.
+Each tree model will be randomly selected during tree spawning.
+
+Example tree models:
+- Oak.rbxm
+- Pine.rbxm
+- Birch.rbxm
+- etc.

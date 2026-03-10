@@ -23,6 +23,7 @@ local WorldScripts = ServerScriptService:WaitForChild("World")
 local Logger          = require(Shared.Core:WaitForChild("Logger"))
 local ChunkService    = require(WorldScripts:WaitForChild("ChunkService"))
 local StreamingService = require(WorldScripts:WaitForChild("StreamingService"))
+local TreeGenerationService = require(WorldScripts:WaitForChild("TreeGenerationService"))
 
 local WorldManager = {}
 
@@ -31,6 +32,8 @@ function WorldManager.init()
 	Logger.Info("[WorldManager] Initialising world systems…")
 	ChunkService.init()
 	Logger.Info("[WorldManager] ChunkService ready.")
+	TreeGenerationService.init()
+	Logger.Info("[WorldManager] TreeGenerationService ready.")
 	StreamingService.init()
 	Logger.Info("[WorldManager] StreamingService ready.")
 	Logger.Info("[WorldManager] All world systems online ✓")
