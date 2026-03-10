@@ -42,6 +42,9 @@ local SCALE_MAX = treeConfig.SCALE_MAX
 
 local TreeSpawner = {}
 
+-- Debug flag to control verbosity of per-chunk logging
+local DEBUG_VERBOSE = true
+
 -- Cache for tree models loaded from the Trees folder
 local treeModels = nil
 local treeModelsFolder = nil
@@ -228,7 +231,7 @@ local function spawnTree(wx, wy, wz, parentFolder)
 	
 	-- Check if PrimaryPart exists
 	if not tree.PrimaryPart then
-		warn(string.format("[TreeSpawner] DEBUG: Tree model '%s' has no PrimaryPart! Setting position directly.", treeModel.Name))
+		warn(string.format("[TreeSpawner] DEBUG: Tree model '%s' has no PrimaryPart! Attempting to set automatically.", treeModel.Name))
 		-- Attempt to find a suitable part to use as anchor
 		local parts = tree:GetDescendants()
 		for _, part in ipairs(parts) do
@@ -293,8 +296,10 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 	local originX = cx * CHUNK_SIZE
 	local originZ = cz * CHUNK_SIZE
 	
-	print(string.format("[TreeSpawner] DEBUG: Starting tree spawn for chunk (%d, %d) | Origin: (%d, %d)", 
-		cx, cz, originX, originZ))
+	if DEBUG_VERBOSE then
+		print(string.format("[TreeSpawner] DEBUG: Starting tree spawn for chunk (%d, %d) | Origin: (%d, %d)", 
+			cx, cz, originX, originZ))
+	end
 	
 	-- Reset debug stats for this chunk
 	local chunkStats = {
@@ -386,12 +391,14 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 	debugStats.failedNotGrass = debugStats.failedNotGrass + chunkStats.failedNotGrass
 	debugStats.failedSlope = debugStats.failedSlope + chunkStats.failedSlope
 	
-	print(string.format(
-		"[TreeSpawner] DEBUG: Chunk (%d, %d) complete - Spawned: %d | Attempts: %d | Failed: density=%d, chance=%d, spacing=%d, no_surface=%d, not_grass=%d, slope=%d",
-		cx, cz, chunkStats.successfulSpawns, chunkStats.attempts,
-		chunkStats.failedDensity, chunkStats.failedChance, chunkStats.failedSpacing,
-		chunkStats.failedNoSurface, chunkStats.failedNotGrass, chunkStats.failedSlope
-	))
+	if DEBUG_VERBOSE then
+		print(string.format(
+			"[TreeSpawner] DEBUG: Chunk (%d, %d) complete - Spawned: %d | Attempts: %d | Failed: density=%d, chance=%d, spacing=%d, no_surface=%d, not_grass=%d, slope=%d",
+			cx, cz, chunkStats.successfulSpawns, chunkStats.attempts,
+			chunkStats.failedDensity, chunkStats.failedChance, chunkStats.failedSpacing,
+			chunkStats.failedNoSurface, chunkStats.failedNotGrass, chunkStats.failedSlope
+		))
+	end
 end
 
 --- Clear cached tree positions for a chunk (call when chunk is unloaded)
