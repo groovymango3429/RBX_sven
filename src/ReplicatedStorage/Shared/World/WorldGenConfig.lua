@@ -34,8 +34,8 @@ WorldGenConfig.Terrain = {
 		{ scale = 0.008, amp = 0.42, seed = 100 },
 		{ scale = 0.016, amp = 0.22, seed = 200 },
 		{ scale = 0.032, amp = 0.10, seed = 300 },
-		{ scale = 0.064, amp = 0.05, seed = 400 },
-		{ scale = 0.128, amp = 0.02, seed = 500 },
+		-- Removed octaves 5 & 6 (scale 0.064/0.128, combined <5% contribution)
+		-- The dithering system already covers micro-variation at those scales.
 	},
 
 	BASE_SCALE = 0.007,
@@ -52,7 +52,7 @@ WorldGenConfig.Terrain = {
 	SURFACE_BLEND_BAND = 4,
 	BEACH_CONTINENTALNESS = 0.34,
 	UNDERGROUND_DEPTH = 18,
-	OVERSAMPLE_SIZE = 2,  -- Reduced from 4 for better performance while maintaining smoothness
+	OVERSAMPLE_SIZE = 1,  -- Single-tap noise; no perceptible quality loss at our scales (period >> 1.5 studs).
 	
 	-- Height dithering to reduce voxel quantization artifacts
 	DITHER_SEED = 9999,
@@ -70,6 +70,13 @@ WorldGenConfig.Terrain = {
 	RIVER_SEED = 3500,
 	RIVER_THRESHOLD = 0.15,          -- Narrower means fewer/thinner rivers
 	RIVER_DEPTH = 3,                 -- How deep rivers carve into terrain
+
+	-- Flat buildable plateau zones: large, gently level areas suitable for
+	-- placing structures.  They appear organically between hills and rivers.
+	FLAT_ZONE_SCALE = 0.0028,        -- Low frequency → large zones (~350 block period)
+	FLAT_ZONE_SEED = 7777,
+	FLAT_ZONE_THRESHOLD = 0.62,      -- Noise fraction above which a flat zone starts
+	FLAT_ZONE_BLEND_WIDTH = 0.12,    -- Smoothstep ramp width for natural zone edges
 }
 
 WorldGenConfig.Trees = {

@@ -90,11 +90,12 @@ local ChunkGenerator = {}
 -- ────────────────────────────────────────────────────────────────────────────
 
 --- _getHeight: Sample the noise heightmap at world position (wx, wz).
--- Returns a continuous surface height clamped to [HEIGHT_MIN, HEIGHT_MAX].
+-- Returns a continuous surface height clamped to [HEIGHT_MIN, HEIGHT_MAX]
+-- and the continentalness value so callers don't need to recompute it.
 -- Applies river carving and lake lowering where appropriate.
 local function _getHeight(wx, wz)
-	local baseHeight = math.clamp(NoiseConfig.GetHeight(wx, wz), HEIGHT_MIN, HEIGHT_MAX)
 	local cont = NoiseConfig.GetContinentalness(wx, wz)
+	local baseHeight = math.clamp(NoiseConfig.GetHeight(wx, wz, cont), HEIGHT_MIN, HEIGHT_MAX)
 	
 	-- Apply river carving
 	local riverInfluence = NoiseConfig.GetRiverInfluence(wx, wz)
@@ -110,7 +111,7 @@ local function _getHeight(wx, wz)
 		baseHeight = baseHeight - (lakeInfluence * T.LAKE_DEPTH_OFFSET)
 	end
 	
-	return math.clamp(baseHeight, HEIGHT_MIN, HEIGHT_MAX)
+	return math.clamp(baseHeight, HEIGHT_MIN, HEIGHT_MAX), cont
 end
 
 local function _getGrassBlend(h, continentalness)
@@ -188,8 +189,7 @@ function ChunkGenerator.generateNoise(cx, cz)
 			biomes[x * S + z + 1] = DEFAULT_BIOME_ID
 
 			-- Surface height for this column
-			local surfH    = _getHeight(wx, originZ + z)
-			local cont     = NoiseConfig.GetContinentalness(wx, originZ + z)
+			local surfH, cont = _getHeight(wx, originZ + z)
 			local surfY    = math.floor(surfH)
 			-- Base flat index for (x, y=0, z) — adding y*S gives (x, y, z)
 			local base     = xStride + z + 1
