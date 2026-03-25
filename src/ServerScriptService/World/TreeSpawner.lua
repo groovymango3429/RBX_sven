@@ -63,6 +63,7 @@ local debugStats = {
 	failedSpacing = 0,
 	failedNoSurface = 0,
 	failedNotGrass = 0,
+	failedHeightGate = 0,
 	failedSlope = 0,
 }
 
@@ -340,6 +341,7 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 		failedSpacing = 0,
 		failedNoSurface = 0,
 		failedNotGrass = 0,
+		failedHeightGate = 0,
 		failedSlope = 0,
 	}
 	
@@ -407,7 +409,7 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 			if shouldSpawn and biomeDef and biomeDef.treeHeightMin and biomeDef.treeHeightMax then
 				if surfaceY < biomeDef.treeHeightMin or surfaceY > biomeDef.treeHeightMax then
 					shouldSpawn = false
-					chunkStats.failedNotGrass = chunkStats.failedNotGrass + 1
+					chunkStats.failedHeightGate = chunkStats.failedHeightGate + 1
 				end
 			end
 			
@@ -444,14 +446,15 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 	debugStats.failedSpacing = debugStats.failedSpacing + chunkStats.failedSpacing
 	debugStats.failedNoSurface = debugStats.failedNoSurface + chunkStats.failedNoSurface
 	debugStats.failedNotGrass = debugStats.failedNotGrass + chunkStats.failedNotGrass
+	debugStats.failedHeightGate = debugStats.failedHeightGate + chunkStats.failedHeightGate
 	debugStats.failedSlope = debugStats.failedSlope + chunkStats.failedSlope
 	
 	if DEBUG_VERBOSE then
 		print(string.format(
-			"[TreeSpawner] DEBUG: Chunk (%d, %d) complete - Spawned: %d | Attempts: %d | Failed: density=%d, chance=%d, spacing=%d, no_surface=%d, not_grass=%d, slope=%d",
+			"[TreeSpawner] DEBUG: Chunk (%d, %d) complete - Spawned: %d | Attempts: %d | Failed: density=%d, chance=%d, spacing=%d, no_surface=%d, not_grass=%d, height_gate=%d, slope=%d",
 			cx, cz, chunkStats.successfulSpawns, chunkStats.attempts,
 			chunkStats.failedDensity, chunkStats.failedChance, chunkStats.failedSpacing,
-			chunkStats.failedNoSurface, chunkStats.failedNotGrass, chunkStats.failedSlope
+			chunkStats.failedNoSurface, chunkStats.failedNotGrass, chunkStats.failedHeightGate, chunkStats.failedSlope
 		))
 	end
 end
@@ -489,6 +492,9 @@ function TreeSpawner.printDebugStats()
 	print(string.format("[TreeSpawner] Failed - Not Grass: %d (%.1f%%)", 
 		debugStats.failedNotGrass,
 		debugStats.attempts > 0 and (debugStats.failedNotGrass / debugStats.attempts * 100) or 0))
+	print(string.format("[TreeSpawner] Failed - Height Gate: %d (%.1f%%)", 
+		debugStats.failedHeightGate,
+		debugStats.attempts > 0 and (debugStats.failedHeightGate / debugStats.attempts * 100) or 0))
 	print(string.format("[TreeSpawner] Failed - Slope: %d (%.1f%%)", 
 		debugStats.failedSlope,
 		debugStats.attempts > 0 and (debugStats.failedSlope / debugStats.attempts * 100) or 0))

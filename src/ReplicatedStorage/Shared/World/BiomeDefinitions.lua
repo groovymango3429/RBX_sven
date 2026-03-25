@@ -68,8 +68,6 @@ BiomeDefinitions.Biomes = {
 		surfaceBlock     = "sand",
 		subSurfaceBlock  = "sand",
 		treeDensityMult  = 0.0,   -- no trees in the desert
-		treeHeightMin    = 0,
-		treeHeightMax    = 0,
 	},
 
 	[BiomeDefinitions.TUNDRA] = {
@@ -81,8 +79,6 @@ BiomeDefinitions.Biomes = {
 		surfaceBlock     = "snow",
 		subSurfaceBlock  = "stone",
 		treeDensityMult  = 0.0,   -- treeless frozen plain
-		treeHeightMin    = 0,
-		treeHeightMax    = 0,
 	},
 
 	[BiomeDefinitions.TAIGA] = {

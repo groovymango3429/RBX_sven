@@ -193,8 +193,8 @@ local function _getSubSurfaceBlock(h, continentalness, biomeId)
 		return biomeBlockId
 	end
 
-	-- Fallback
-	if _getSurfaceBlock(h, continentalness, biomeId) == ID_GRASS then
+	-- Fallback: use dirt in grassy altitude range, sand near/below water level
+	if h >= GRASS_HEIGHT then
 		return ID_DIRT
 	end
 	return ID_SAND
