@@ -18,6 +18,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder = Shared:WaitForChild("World")
 local WorldGenConfig = require(WorldFolder:WaitForChild("WorldGenConfig"))
 local terrainConfig = WorldGenConfig.Terrain
+local biomeConfig   = WorldGenConfig.Biomes
 local MIN_DETAIL_SCALE = terrainConfig.MinDetailScale
 local ELEVATION_DETAIL_FACTOR = terrainConfig.ElevationDetailFactor
 local MOUNTAIN_DETAIL_BOOST = terrainConfig.MountainDetailBoost
@@ -167,6 +168,10 @@ local function applyHeightDither(x, z, height)
 	return height + dither
 end
 
+-- Seed offset used when sampling ridged noise octaves so the ridge pattern
+-- is spatially independent of the standard fBm detail pass.
+local RIDGED_SEED_OFFSET = 9000
+
 function NoiseConfig.GetContinentalness(x, z)
 	local cfg = NoiseConfig.TERRAIN
 	local n = sampleNoise(x, z, cfg.CONT_SCALE, cfg.CONT_SEED)
@@ -211,6 +216,25 @@ function NoiseConfig.GetHeight(x, z, precomputedCont)
 
 	-- Safe after the early return above; detail is now normalized to a predictable range.
 	detail = detail / ampSum
+
+	-- ── Ridged-noise blend for mountain peaks ─────────────────────────────────
+	-- In mountainous regions we mix a ridged fBm pass (1 - |noise|) with the
+	-- standard detail.  Ridged noise produces sharp, realistic mountain ridges
+	-- instead of the rounded bumps from plain fBm.  The blend is zero outside
+	-- mountain territory so plains and hills are completely unaffected.
+	if mountainMask > 0 then
+		local ridged = 0
+		for _, octave in ipairs(cfg.OCTAVES) do
+			-- Shift the seed so this pass is spatially independent of the fBm pass.
+			local n = math.noise(x * octave.scale, z * octave.scale, octave.seed + RIDGED_SEED_OFFSET)
+			ridged = ridged + (1 - math.abs(n)) * octave.amp
+		end
+		-- Normalize to approx. [-0.5, 0.5] to match the fBm detail range.
+		ridged = (ridged / ampSum) - 0.5
+		-- Full mountains are 65 % ridged; the ratio ramps smoothly from zero.
+		local ridgedBlend = mountainMask * 0.65
+		detail = detail * (1 - ridgedBlend) + ridged * ridgedBlend
+	end
 
 	-- Plains stay broad and calm, hills get moderate variation, and only the
 	-- mountain mask unlocks the larger peaks/valleys.
@@ -285,6 +309,34 @@ function NoiseConfig.IsLakePosition(x, z, continentalness)
 		return smoothstep(1 - (continentalness / cfg.LAKE_THRESHOLD))
 	end
 	return 0
+end
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Climate noise  (used by the biome system)
+-- Both functions return a value in [0, 1].  They use very low-frequency noise
+-- so climate zones transition gradually across hundreds of blocks.
+-- ────────────────────────────────────────────────────────────────────────────
+
+--- GetTemperature: Hot/cold axis at world position (x, z).
+-- 0 = arctic cold, 1 = tropical hot.
+function NoiseConfig.GetTemperature(x, z)
+	local n = math.noise(
+		x * biomeConfig.TEMPERATURE_SCALE,
+		z * biomeConfig.TEMPERATURE_SCALE,
+		biomeConfig.TEMPERATURE_SEED
+	)
+	return math.clamp((n + 1) * 0.5, 0, 1)
+end
+
+--- GetHumidity: Dry/wet axis at world position (x, z).
+-- 0 = arid desert, 1 = tropical rainforest.
+function NoiseConfig.GetHumidity(x, z)
+	local n = math.noise(
+		x * biomeConfig.HUMIDITY_SCALE,
+		z * biomeConfig.HUMIDITY_SCALE,
+		biomeConfig.HUMIDITY_SEED
+	)
+	return math.clamp((n + 1) * 0.5, 0, 1)
 end
 
 return NoiseConfig
