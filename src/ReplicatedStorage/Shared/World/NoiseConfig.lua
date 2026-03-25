@@ -91,6 +91,12 @@ NoiseConfig.TERRAIN = {
 	RIVER_SEED = terrainConfig.RIVER_SEED,
 	RIVER_THRESHOLD = terrainConfig.RIVER_THRESHOLD,
 	RIVER_DEPTH = terrainConfig.RIVER_DEPTH,
+
+	-- Flat buildable plateau zones
+	FLAT_ZONE_SCALE = terrainConfig.FLAT_ZONE_SCALE,
+	FLAT_ZONE_SEED = terrainConfig.FLAT_ZONE_SEED,
+	FLAT_ZONE_THRESHOLD = terrainConfig.FLAT_ZONE_THRESHOLD,
+	FLAT_ZONE_BLEND_WIDTH = terrainConfig.FLAT_ZONE_BLEND_WIDTH,
 }
 
 -- Randomize seeds when module loads so each session gets a different world
@@ -120,8 +126,13 @@ end
 
 local function sampleNoise(x, z, scale, seed)
 	local cfg = NoiseConfig.TERRAIN
-	local sum = 0
 	local step = cfg.OVERSAMPLE_SIZE
+	-- Fast path: single tap (OVERSAMPLE_SIZE = 1). All of our noise frequencies
+	-- have periods >> 1.5 studs so extra taps add no perceptible smoothing.
+	if step <= 1 then
+		return math.noise(x * scale, z * scale, seed)
+	end
+	local sum = 0
 	local count = step * step
 	local oversampleSpacing = 1.5  -- world-space spacing between oversample taps
 	local gridCenterOffset = (step - 1) / 2
@@ -168,9 +179,19 @@ function NoiseConfig.GetLandformMix(x, z)
 	return math.clamp((n + 1) * 0.5, 0, 1)
 end
 
-function NoiseConfig.GetHeight(x, z)
+-- Return a 0-1 influence value for flat buildable zones.
+-- Uses direct math.noise (no oversampling) since flat zones are large features.
+function NoiseConfig.GetFlatZoneInfluence(x, z)
 	local cfg = NoiseConfig.TERRAIN
-	local cont = NoiseConfig.GetContinentalness(x, z)
+	local n = math.noise(x * cfg.FLAT_ZONE_SCALE, z * cfg.FLAT_ZONE_SCALE, cfg.FLAT_ZONE_SEED)
+	local v = math.clamp((n + 1) * 0.5, 0, 1)
+	if v < cfg.FLAT_ZONE_THRESHOLD then return 0 end
+	return smoothstep(math.clamp((v - cfg.FLAT_ZONE_THRESHOLD) / cfg.FLAT_ZONE_BLEND_WIDTH, 0, 1))
+end
+
+function NoiseConfig.GetHeight(x, z, precomputedCont)
+	local cfg = NoiseConfig.TERRAIN
+	local cont = precomputedCont or NoiseConfig.GetContinentalness(x, z)
 	local landform = NoiseConfig.GetLandformMix(x, z)
 	local hillMask = smoothstep(inverseLerp(cfg.HILL_START, cfg.MOUNTAIN_START, landform))
 	local mountainMask = smoothstep(inverseLerp(cfg.MOUNTAIN_START, 1, landform))
@@ -201,6 +222,21 @@ function NoiseConfig.GetHeight(x, z)
 	local detailStrength = MIN_DETAIL_SCALE
 		+ hillMask * ELEVATION_DETAIL_FACTOR
 		+ mountainMask * MOUNTAIN_DETAIL_BOOST
+
+	-- Flat zones: large, naturally level areas suitable for placing structures.
+	-- Blend normalizedHeight toward a consistent plateau elevation and suppress
+	-- octave detail so the surface stays buildably smooth.  Mountain areas are
+	-- excluded (mountainMask drives flatZone to 0) so peaks keep their drama.
+	local flatZone = NoiseConfig.GetFlatZoneInfluence(x, z) * (1 - mountainMask)
+	if flatZone > 0 then
+		-- Target a gentle, buildable elevation (just above water, in grassy range).
+		local flatTarget = math.clamp(
+			BASE_ELEVATION_FLOOR + cont * CONTINENTAL_ELEVATION_WEIGHT + 0.04,
+			0.28, 0.52
+		)
+		normalizedHeight = normalizedHeight + (flatTarget - normalizedHeight) * flatZone * 0.80
+		detailStrength    = detailStrength    * (1 - flatZone * 0.88)
+	end
 
 	detail = detail * detailStrength
 	detail = detail + sampleNoise(x, z, cfg.BASE_SCALE, cfg.BASE_SEED) * cfg.BASE_AMP
