@@ -24,6 +24,7 @@ local ChunkConstants = require(WorldFolder:WaitForChild("ChunkConstants"))
 local BlockRegistry = require(WorldFolder:WaitForChild("BlockRegistry"))
 local NoiseConfig = require(WorldFolder:WaitForChild("NoiseConfig"))
 local WorldGenConfig = require(WorldFolder:WaitForChild("WorldGenConfig"))
+local BiomeDefinitions = require(WorldFolder:WaitForChild("BiomeDefinitions"))
 
 local CHUNK_SIZE = ChunkConstants.CHUNK_SIZE
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT
@@ -353,29 +354,45 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 			
 			-- Sequential checks using a skip flag (avoid goto)
 			local shouldSpawn = true
-			
-			local density = getTreeDensity(wx, wz)
-			if density < TREE_CLUSTER_THRESHOLD then
+
+			-- ── Biome check ────────────────────────────────────────────────────
+			-- Read the biome ID stored by ChunkGenerator and look up its
+			-- tree density multiplier.  Biomes with multiplier 0 never grow trees.
+			local biomeId = chunk:getBiome(x, z)
+			local biomeDef = BiomeDefinitions.getById(biomeId)
+			local biomeDensityMult = biomeDef and biomeDef.treeDensityMult or 1.0
+
+			if biomeDensityMult <= 0 then
 				shouldSpawn = false
 				chunkStats.failedDensity = chunkStats.failedDensity + 1
 			end
 			
-			-- Random chance based on density (not every valid spot gets a tree)
+			-- ── Base density check ─────────────────────────────────────────────
+			local density = getTreeDensity(wx, wz)
+			if shouldSpawn and density < TREE_CLUSTER_THRESHOLD then
+				shouldSpawn = false
+				chunkStats.failedDensity = chunkStats.failedDensity + 1
+			end
+			
+			-- ── Random chance based on density × biome multiplier ──────────────
+			-- biomeDensityMult scales the per-spot probability so forests are
+			-- dense and savannas are sparse while using the same noise field.
 			if shouldSpawn then
-				local spawnChance = (density - TREE_CLUSTER_THRESHOLD) / (1 - TREE_CLUSTER_THRESHOLD)
+				local baseChance = (density - TREE_CLUSTER_THRESHOLD) / (1 - TREE_CLUSTER_THRESHOLD)
+				local spawnChance = baseChance * biomeDensityMult
 				if spawnChance <= 0 or math.random() > spawnChance * 0.3 then  -- 30% max spawn rate in dense areas
 					shouldSpawn = false
 					chunkStats.failedChance = chunkStats.failedChance + 1
 				end
 			end
 			
-			-- Check spacing
+			-- ── Spacing check ──────────────────────────────────────────────────
 			if shouldSpawn and isTooCloseToExistingTree(wx, wz, cx, cz) then
 				shouldSpawn = false
 				chunkStats.failedSpacing = chunkStats.failedSpacing + 1
 			end
 			
-			-- Find surface Y
+			-- ── Find surface Y ─────────────────────────────────────────────────
 			local surfaceY = nil
 			if shouldSpawn then
 				surfaceY = findSurfaceY(chunk, x, z)
@@ -384,14 +401,23 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 					chunkStats.failedNoSurface = chunkStats.failedNoSurface + 1
 				end
 			end
+
+			-- ── Biome height gate ──────────────────────────────────────────────
+			-- Optionally restrict trees to a biome-specific Y range.
+			if shouldSpawn and biomeDef and biomeDef.treeHeightMin and biomeDef.treeHeightMax then
+				if surfaceY < biomeDef.treeHeightMin or surfaceY > biomeDef.treeHeightMax then
+					shouldSpawn = false
+					chunkStats.failedNotGrass = chunkStats.failedNotGrass + 1
+				end
+			end
 			
-			-- Check if surface is grass
+			-- ── Surface-type check ─────────────────────────────────────────────
 			if shouldSpawn and not isGrassSurface(chunk, x, surfaceY, z) then
 				shouldSpawn = false
 				chunkStats.failedNotGrass = chunkStats.failedNotGrass + 1
 			end
 			
-			-- Check slope
+			-- ── Slope check ────────────────────────────────────────────────────
 			if shouldSpawn then
 				local slope = calculateSlope(chunk, x, z, wx, wz)
 				if slope > MAX_SLOPE_FOR_TREES then
@@ -400,7 +426,7 @@ function TreeSpawner.spawnTreesInChunk(chunk, parentFolder)
 				end
 			end
 			
-			-- Spawn the tree if all checks passed
+			-- ── Spawn ──────────────────────────────────────────────────────────
 			if shouldSpawn then
 				if spawnTree(wx, surfaceY + 1, wz, parentFolder) then
 					recordTreePosition(wx, wz, cx, cz)

@@ -16,15 +16,24 @@
   Height shaping (oversampled)
   ----------------------------
   Terrain heights come from NoiseConfig.GetHeight(), which combines a
-  low-frequency continental layer with oversampled multi-octave detail.
-  This keeps plains and mountain ranges broad while smoothing out the
-  higher-frequency noise that made the previous terrain look blocky.
+  low-frequency continental layer with oversampled multi-octave detail and
+  a ridged-noise blend for sharper mountain peaks.
 
   Surface block selection
   -----------------------
-    High elevations still become snow / rock, but low-elevation shoreline
-    blending now also considers continentalness so inland valleys stay grassy
-    more often while beaches remain near coasts and low water-adjacent areas.
+  A two-pass strategy is used:
+    1. Pre-compute all column heights, continentalness values, and biome IDs
+       into flat cache arrays.  This eliminates redundant noise calls and
+       makes the data available to CaveCarver without re-sampling.
+    2. For each column, altitude overrides (snow peak, rocky hillside) take
+       priority; below those thresholds the biome's palette is used.  The
+       original beach/shore blend is preserved for coastal columns.
+
+  Cave generation
+  ---------------
+  After terrain fill, CaveCarver.carveChunk() hollows out underground stone
+  using 3-D spaghetti-tunnel and cheese-cavern noise, depth-gated so caves
+  never break the surface.
 
   Water fill
   ----------
@@ -33,22 +42,28 @@
 
   Performance notes
   -----------------
-  • Only UNDERGROUND_DEPTH blocks per column are filled as solid — all
-    deeper blocks stay as air (table.create initialises to 0).  This cuts
-    stone writes by ~75 % compared to the old flat generator.
-  • Height sampling avoids Vector3 / object allocation by using plain numbers.
-  • markClean() is called once at the end, not inside the loops.
+  • Per-chunk column cache (heightMap / contMap / biomeMap) computed upfront
+    so each noise query happens exactly once per column.
+  • Only UNDERGROUND_DEPTH blocks per column are filled as solid.
+  • CaveCarver receives the pre-computed heightMap — no double noise eval.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared            = ReplicatedStorage:WaitForChild("Shared")
 local WorldFolder       = Shared:WaitForChild("World")
 
-local ChunkConstants = require(WorldFolder:WaitForChild("ChunkConstants"))
-local ChunkData      = require(WorldFolder:WaitForChild("ChunkData"))
-local BlockRegistry  = require(WorldFolder:WaitForChild("BlockRegistry"))
-local NoiseConfig    = require(WorldFolder:WaitForChild("NoiseConfig"))
-local WorldConstants = require(WorldFolder:WaitForChild("WorldConstants"))
+local ServerScriptService = game:GetService("ServerScriptService")
+local WorldScripts        = ServerScriptService:WaitForChild("World")
+
+local ChunkConstants    = require(WorldFolder:WaitForChild("ChunkConstants"))
+local ChunkData         = require(WorldFolder:WaitForChild("ChunkData"))
+local BlockRegistry     = require(WorldFolder:WaitForChild("BlockRegistry"))
+local NoiseConfig       = require(WorldFolder:WaitForChild("NoiseConfig"))
+local WorldConstants    = require(WorldFolder:WaitForChild("WorldConstants"))
+local BiomeDefinitions  = require(WorldFolder:WaitForChild("BiomeDefinitions"))
+
+local BiomeMapper  = require(WorldScripts:WaitForChild("BiomeMapper"))
+local CaveCarver   = require(WorldScripts:WaitForChild("CaveCarver"))
 
 local CHUNK_SIZE   = ChunkConstants.CHUNK_SIZE
 local CHUNK_HEIGHT = ChunkConstants.CHUNK_HEIGHT
@@ -62,8 +77,14 @@ local ID_SAND    = BlockRegistry.getId("sand")     -- 4
 local ID_SNOW    = BlockRegistry.getId("snow")     -- 18
 local ID_WATER   = BlockRegistry.getId("water")    -- 11
 
--- Default biome ID (0 = plains / default)
-local DEFAULT_BIOME_ID = 0
+-- Pre-resolve biome surface/sub-surface block IDs for all registered biomes.
+-- This avoids string lookups inside the hot generation loop.
+local _biomeSurface    = {}  -- [biomeId] = surfaceBlockId
+local _biomeSubSurface = {}  -- [biomeId] = subSurfaceBlockId
+for id, def in pairs(BiomeDefinitions.Biomes) do
+	_biomeSurface[id]    = BlockRegistry.getId(def.surfaceBlock)
+	_biomeSubSurface[id] = BlockRegistry.getId(def.subSurfaceBlock)
+end
 
 -- Noise configuration (read once for speed)
 local T           = NoiseConfig.TERRAIN
@@ -82,6 +103,9 @@ local BEACH_CONTINENTALNESS = T.BEACH_CONTINENTALNESS
 -- appearing as isolated circular patches deeper inland.
 local CONTINENTALNESS_GRASS_WEIGHT = 0.85
 local SHORE_BLEND_GRASS_WEIGHT = 0.35
+
+-- Desert biome ID shortcut for the beach-override check
+local BIOME_DESERT = BiomeDefinitions.DESERT
 
 local ChunkGenerator = {}
 
@@ -132,29 +156,48 @@ local function _getGrassBlend(h, continentalness)
 	)
 end
 
---- _getSurfaceBlock: Top block ID based on terrain height + continentalness.
-local function _getSurfaceBlock(h, continentalness)
-	if h >= SNOW_HEIGHT  then return ID_SNOW  end  -- mountain peak
-	if h >= ROCK_HEIGHT  then return ID_STONE end  -- rocky hillside
+--- _getSurfaceBlock: Top block ID based on terrain height, continentalness,
+-- and biome.  Altitude overrides (snow peaks, rocky hillsides) take priority.
+-- Coastal sand blending is suppressed for desert biomes (already sandy).
+local function _getSurfaceBlock(h, continentalness, biomeId)
+	-- ── Altitude overrides (independent of biome) ─────────────────────────
+	if h >= SNOW_HEIGHT then return ID_SNOW  end
+	if h >= ROCK_HEIGHT  then return ID_STONE end
 
-	-- Keep sandy beaches concentrated to genuinely coastal / water-adjacent
-	-- lowlands while allowing sheltered inland valleys to stay grassy.
-	if h <= WATER_LEVEL + SHORE_HEIGHT_BAND and continentalness < BEACH_CONTINENTALNESS then
+	-- ── Coastal sand strip (skip for desert — it's sand anyway) ───────────
+	if biomeId ~= BIOME_DESERT
+		and h <= WATER_LEVEL + SHORE_HEIGHT_BAND
+		and continentalness < BEACH_CONTINENTALNESS then
 		return ID_SAND
 	end
+
+	-- ── Biome-determined surface block ────────────────────────────────────
+	local biomeBlockId = _biomeSurface[biomeId]
+	if biomeBlockId then
+		return biomeBlockId
+	end
+
+	-- ── Fallback: original grass-blend logic ──────────────────────────────
 	if _getGrassBlend(h, continentalness) >= 0.5 then
 		return ID_GRASS
 	end
 	return ID_SAND
 end
 
---- _getSubSurfaceBlock: Block directly beneath the surface.
-local function _getSubSurfaceBlock(h, continentalness)
-	if h >= ROCK_HEIGHT  then return ID_STONE end  -- rocky
-	if _getSurfaceBlock(h, continentalness) == ID_GRASS then
+--- _getSubSurfaceBlock: Block directly beneath the surface, biome-aware.
+local function _getSubSurfaceBlock(h, continentalness, biomeId)
+	if h >= ROCK_HEIGHT then return ID_STONE end
+
+	local biomeBlockId = _biomeSubSurface[biomeId]
+	if biomeBlockId then
+		return biomeBlockId
+	end
+
+	-- Fallback
+	if _getSurfaceBlock(h, continentalness, biomeId) == ID_GRASS then
 		return ID_DIRT
 	end
-	return ID_SAND                                 -- sandy biome
+	return ID_SAND
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -163,9 +206,12 @@ end
 
 --- generateNoise: Generate noise-based terrain for the given chunk.
 --
--- Only UNDERGROUND_DEPTH blocks per column are written as solid — everything
--- deeper stays as air (0).  This significantly reduces block writes and
--- speeds up generation without affecting the visible surface.
+-- Two-phase approach:
+--   Phase 1 — Pre-compute height / continentalness / biome for every column.
+--             Stores results in flat cache arrays so Phase 2 and CaveCarver
+--             can share the data without re-evaluating noise.
+--   Phase 2 — Fill voxel data using the cached column values.
+--   Phase 3 — Post-process with CaveCarver (3-D cave hollowing).
 --
 -- @param cx  number  Chunk X in world grid
 -- @param cz  number  Chunk Z in world grid
@@ -181,56 +227,81 @@ function ChunkGenerator.generateNoise(cx, cz)
 	local originX = cx * S
 	local originZ = cz * S
 
+	-- ── Phase 1: Pre-compute per-column data ────────────────────────────────
+	-- colIdx = x * S + z + 1  (same convention as ChunkData biomes array)
+	local heightMap  = table.create(S * S, 0)  -- continuous surface heights
+	local surfYMap   = table.create(S * S, 0)  -- floor(surfaceHeight)
+	local contMap    = table.create(S * S, 0)  -- continentalness [0,1]
+	local biomeMap   = table.create(S * S, 0)  -- biome ID
+
+	for x = 0, S - 1 do
+		local wx = originX + x
+		for z = 0, S - 1 do
+			local wz  = originZ + z
+			local idx = x * S + z + 1
+
+			local surfH, cont = _getHeight(wx, wz)
+			local biomeId     = BiomeMapper.getBiomeAt(wx, wz)
+
+			heightMap[idx] = surfH
+			surfYMap[idx]  = math.floor(surfH)
+			contMap[idx]   = cont
+			biomeMap[idx]  = biomeId
+		end
+	end
+
+	-- ── Phase 2: Voxel fill using cached column data ─────────────────────────
 	for x = 0, S - 1 do
 		local xStride = x * (H * S)
-		local wx      = originX + x
 		for z = 0, S - 1 do
-			-- Biome (uniform plains for now)
-			biomes[x * S + z + 1] = DEFAULT_BIOME_ID
+			local colIdx  = x * S + z + 1
+			local surfH   = heightMap[colIdx]
+			local surfY   = surfYMap[colIdx]
+			local cont    = contMap[colIdx]
+			local biomeId = biomeMap[colIdx]
 
-			-- Surface height for this column
-			local surfH, cont = _getHeight(wx, originZ + z)
-			local surfY    = math.floor(surfH)
+			-- Write biome ID into the chunk for downstream consumers (TreeSpawner, etc.)
+			biomes[colIdx] = biomeId
+
 			-- Base flat index for (x, y=0, z) — adding y*S gives (x, y, z)
-			local base     = xStride + z + 1
+			local base = xStride + z + 1
 
-			-- ── Bedrock ───────────────────────────────────────────────────
+			-- ── Bedrock ─────────────────────────────────────────────────
 			blocks[base] = ID_BEDROCK
 
-			-- ── Stone fill ────────────────────────────────────────────────
+			-- ── Stone fill ──────────────────────────────────────────────
 			-- Only fill from (surfY - DEPTH + 1) down to (surfY - 2).
-			-- Y = 1 .. surfY - DEPTH remain air for performance.
 			local stoneStart = math.max(1, surfY - DEPTH + 1)
 			local stoneEnd   = surfY - 2
 			for y = stoneStart, stoneEnd do
 				blocks[base + y * S] = ID_STONE
 			end
 
-			-- ── Sub-surface block (dirt / sand) ───────────────────────────
+			-- ── Sub-surface block (dirt / sand / stone) ─────────────────
 			local subY = surfY - 1
 			if subY >= 1 and subY < H then
-				blocks[base + subY * S] = _getSubSurfaceBlock(surfH, cont)
+				blocks[base + subY * S] = _getSubSurfaceBlock(surfH, cont, biomeId)
 			end
 
-			-- ── Top surface block (grass / sand / stone / snow) ───────────
+			-- ── Top surface block ────────────────────────────────────────
 			if surfY >= 0 and surfY < H then
-				blocks[base + surfY * S] = _getSurfaceBlock(surfH, cont)
+				blocks[base + surfY * S] = _getSurfaceBlock(surfH, cont, biomeId)
 			end
 
-			-- ── Water fill (columns below sea level) ──────────────────────
-			-- Fill from the terrain surface upward, clamped to the chunk height
-			-- so submerged columns always receive water instead of exposing rock.
+			-- ── Water fill (columns below sea level) ────────────────────
 			if surfH < WATER_LEVEL then
 				local waterStart = math.max(surfY + 1, 1)
-				local waterEnd = math.min(WATER_LEVEL, H - 1)
+				local waterEnd   = math.min(WATER_LEVEL, H - 1)
 				for y = waterStart, waterEnd do
 					blocks[base + y * S] = ID_WATER
 				end
 			end
-
-			-- Y > max(surfH, WATER_LEVEL) is already 0 (air)
 		end
 	end
+
+	-- ── Phase 3: Cave carving ────────────────────────────────────────────────
+	-- CaveCarver uses the pre-computed surfYMap so it never resamples noise.
+	CaveCarver.carveChunk(chunk, cx, cz, surfYMap)
 
 	-- Mark clean — freshly generated, nothing to save yet
 	chunk:markClean()
@@ -260,7 +331,7 @@ function ChunkGenerator.generateFlat(cx, cz)
 	for x = 0, S - 1 do
 		local xStride = x * (H * S)
 		for z = 0, S - 1 do
-			biomes[x * S + z + 1] = DEFAULT_BIOME_ID
+			biomes[x * S + z + 1] = BiomeDefinitions.PLAINS  -- flat world = plains
 			local base = xStride + z + 1
 			blocks[base] = ID_BEDROCK
 			for y = 1, surfM2 do
@@ -284,3 +355,4 @@ function ChunkGenerator.generate(cx, cz)
 end
 
 return ChunkGenerator
+

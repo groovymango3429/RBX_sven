@@ -97,4 +97,45 @@ WorldGenConfig.Trees = {
 	TREE_MODELS_PATH = "Shared/Environment/Trees",
 }
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- Biome climate-noise settings
+-- Temperature and humidity are each independent large-scale noise layers that
+-- determine which biome occupies a given region.  The scales are intentionally
+-- very low so that climate zones transition over hundreds of blocks, creating
+-- continent-scale biome bands rather than salt-and-pepper noise.
+-- ────────────────────────────────────────────────────────────────────────────
+WorldGenConfig.Biomes = {
+	-- Temperature gradient — controls hot/cold axis
+	TEMPERATURE_SCALE = 0.00055,
+	TEMPERATURE_SEED  = 4200,
+	-- Humidity gradient — controls dry/wet axis, independent of temperature
+	HUMIDITY_SCALE    = 0.00070,
+	HUMIDITY_SEED     = 6300,
+}
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Cave generation settings
+-- Two complementary noise passes produce realistic underground systems:
+--   • Spaghetti tunnels  — two perpendicular 3-D noise channels; a voxel
+--     becomes a tunnel where (n1² + n2²) < CAVE_THRESHOLD_SQ.
+--   • Cheese caverns     — a single 3-D noise channel; a voxel becomes a
+--     chamber where |noise| < CAVE_CHEESE_THRESHOLD.
+-- Both passes are depth-gated so caves never breach the surface.
+-- ────────────────────────────────────────────────────────────────────────────
+WorldGenConfig.Caves = {
+	-- Spaghetti-tunnel noise
+	CAVE_SCALE        = 0.052,
+	CAVE_SEED_1       = 1111,
+	CAVE_SEED_2       = 2222,
+	-- Lower threshold → narrower / rarer tunnels (range ~0.02–0.08)
+	CAVE_THRESHOLD_SQ = 0.046,
+	-- Cheese-cavern noise (distinct scale/seed for independent chambers)
+	CAVE_CHEESE_SCALE    = 0.034,
+	CAVE_CHEESE_SEED     = 4444,
+	CAVE_CHEESE_THRESHOLD = 0.18,
+	-- Minimum distance below the terrain surface before caves can start
+	CAVE_MIN_DEPTH        = 8,
+	CAVE_CHEESE_MIN_DEPTH = 14,
+}
+
 return table.freeze(WorldGenConfig)
